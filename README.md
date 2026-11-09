@@ -1,0 +1,127 @@
+# Songly Insights
+
+API do analizy odsłuchów muzyki: kto czego słucha, kiedy i jakich gatunków.
+Zbudowane w **FastAPI**, **SQLAlchemy 2.0**, **Alembic** i **PostgreSQL 16**.
+
+To pierwszy etap większego projektu portfolio (zobacz [Roadmapę](#roadmapa)).
+
+## Szybki start
+
+Wymagania: Python 3.12+, Docker (albo lokalny PostgreSQL 16).
+
+```bash
+docker compose up -d db          # PostgreSQL + baza testowa insights_test
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env
+alembic upgrade head             # schemat bazy z migracji
+python -m app.cli seed --reset   # dane syntetyczne: 25 słuchaczy, 10 000 odsłuchów
+uvicorn app.main:app --reload
+```
+
+Dokumentacja interaktywna: <http://localhost:8000/docs>.
+
+Przykłady:
+
+```bash
+curl "localhost:8000/api/v1/stats/top-artists?from=2025-12-01&to=2026-01-01&limit=5"
+curl "localhost:8000/api/v1/stats/daily?from=2025-12-25&to=2026-01-01&listener_id=1"
+curl "localhost:8000/api/v1/listeners/1/summary"
+```
+
+Dane syntetyczne obejmują 90 dni kończących się 2026-01-01 (UTC), więc wyniki są zawsze takie same.
+
+## Endpointy
+
+Wszystkie poza `/health` mają prefiks `/api/v1`.
+
+| Metoda | Ścieżka | Opis |
+|---|---|---|
+| GET | `/health` | Stan API i połączenia z bazą (503, gdy baza nie odpowiada) |
+| GET, POST | `/genres` | Lista gatunków / nowy gatunek |
+| GET, POST | `/artists` | Lista artystów (`q` – wyszukiwanie po nazwie, paginacja) / nowy artysta |
+| GET | `/artists/{id}` | Artysta z gatunkami |
+| GET, POST | `/tracks` | Lista utworów (filtr `artist_id`) / nowy utwór |
+| GET | `/tracks/{id}` | Utwór |
+| GET, POST | `/listeners` | Lista słuchaczy / nowy słuchacz |
+| GET | `/listeners/{id}` | Słuchacz |
+| GET | `/listeners/{id}/summary` | Podsumowanie słuchacza w oknie czasowym |
+| POST | `/listening-events/bulk` | Idempotentny import do 10 000 odsłuchów |
+| GET | `/listening-events` | Lista odsłuchów (okno czasowe, `listener_id`, paginacja) |
+| GET | `/stats/top-tracks` | Najczęściej słuchane utwory |
+| GET | `/stats/top-artists` | Najczęściej słuchani artyści |
+| GET | `/stats/top-genres` | Najczęściej słuchane gatunki |
+| GET | `/stats/daily` | Liczba odsłuchów na dzień (UTC) |
+
+Statystyki przyjmują `from`, `to` (okno czasowe), `listener_id` i `limit` (1–100).
+Listy przyjmują `limit` (1–200) i `offset`.
+
+### Reguły domenowe
+
+- Okno czasowe jest półotwarte: `from` włącznie, `to` wyłącznie. Daty bez strefy czasowej
+  to UTC, a dni są liczone w UTC ([ADR 0003](docs/adr/0003-okna-czasowe-utc-i-gatunki.md)).
+- Odsłuch jest unikalny po `(listener_id, track_id, listened_at)`, więc ponowny import tych
+  samych danych niczego nie dubluje
+  ([ADR 0002](docs/adr/0002-unikalnosc-zdarzen-i-idempotentny-import.md)).
+- Odsłuch liczy się do każdego gatunku artysty, dlatego suma po gatunkach może być większa
+  niż liczba odsłuchów.
+
+### Format błędów
+
+Każdy błąd ma ten sam kształt:
+
+```json
+{"error": {"code": "invalid_time_window", "message": "`from` must be earlier than `to`", "details": {}}}
+```
+
+Kody: `validation_error` (422), `invalid_time_window` (422), `unknown_reference` (422),
+`not_found` (404), `conflict` (409), `method_not_allowed` (405), `database_unavailable` (503),
+`internal_error` (500).
+
+## Struktura projektu
+
+```
+app/
+  main.py          tworzenie aplikacji, podpięcie routerów i obsługi błędów
+  config.py        ustawienia z .env (pydantic-settings)
+  db.py            silnik, sesje, Base z konwencją nazw ograniczeń
+  models.py        modele SQLAlchemy
+  errors.py        wspólny format błędów
+  routers/         warstwa HTTP (cienka): parametry -> serwis -> odpowiedź
+  services/        logika i zapytania: katalog, import odsłuchów, statystyki, okno czasowe
+  schemas/         modele Pydantic (kontrakt API)
+  seed/            deterministyczny generator danych i loader
+  cli.py           python -m app.cli seed
+migrations/        migracje Alembic
+tests/             testy na prawdziwym PostgreSQL
+docs/adr/          zapisy decyzji architektonicznych
+```
+
+## Testy i jakość
+
+```bash
+ruff check . && ruff format --check . && pytest
+```
+
+Testy łączą się z bazą `insights_test` (`TEST_DATABASE_URL`), czyszczą ją i budują schemat
+z prawdziwych migracji. Jeden z testów porównuje modele z migracjami i nie przejdzie, jeśli
+zmienisz model bez `alembic revision --autogenerate -m "..."`. Ten sam zestaw uruchamia
+GitHub Actions przy każdym pushu.
+
+## Decyzje architektoniczne
+
+- [ADR 0001: Stos technologiczny API](docs/adr/0001-stos-technologiczny.md)
+- [ADR 0002: Unikalność zdarzeń i idempotentny import](docs/adr/0002-unikalnosc-zdarzen-i-idempotentny-import.md)
+- [ADR 0003: Okna czasowe, dni w UTC i liczenie gatunków](docs/adr/0003-okna-czasowe-utc-i-gatunki.md)
+- [ADR 0004: Źródła danych (bez Spotify Web API)](docs/adr/0004-zrodla-danych.md)
+
+## Roadmapa
+
+1. **Etap 1: API analityczne** (gotowe): katalog, idempotentny import odsłuchów, statystyki
+   w oknach czasowych, dane syntetyczne, testy na PostgreSQL, CI.
+2. **Etap 2: pipeline danych**: warstwy raw → staging → marts w PostgreSQL, orkiestracja
+   (Airflow lub Prefect), testy jakości danych, import danych z MusicBrainz. API działa dalej
+   w trakcie budowy pipeline'u.
+3. **Etap 3** (wstępnie): rozszerzona analityka na martach, np. trendy, sesje słuchania,
+   podobieństwo słuchaczy, opcjonalnie dane z ListenBrainz.
+4. **Etap 4** (wstępnie): wdrożenie, monitoring i dashboard.

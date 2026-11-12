@@ -35,7 +35,7 @@ jobs:
       - run: ruff format --check .
       - run: pytest
 
-  # Prometheus configuration and unit tests of the alert rules (ADR 0014).
+  # Prometheus and Alertmanager configuration, unit tests of the alert rules (ADR 0014, 0015).
   alerts:
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +48,11 @@ jobs:
           }
           promtool check config prometheus.yml
           promtool test rules alerts_test.yml
+      - name: Check Alertmanager config and message templates
+        run: |
+          docker run --rm --entrypoint amtool \
+            -v "$PWD/deploy/alertmanager:/etc/alertmanager" prom/alertmanager:v0.28.1 \
+            check-config /etc/alertmanager/alertmanager.yml
 
   # Builds the Docker image on every push; publishes it to GitHub Container Registry
   # (ghcr.io/<owner>/<repo>) only from the default branch (ADR 0013).

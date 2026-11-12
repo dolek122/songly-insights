@@ -172,6 +172,7 @@ docker compose --profile full run --rm pipeline python -m pipeline run
 | Grafana | <http://localhost:3000> (admin / `GRAFANA_ADMIN_PASSWORD`) | Dashboardy w folderze „Songly Insights” |
 | Prometheus | <http://localhost:9090/alerts> | Metryki i alerty |
 | Prefect | <http://localhost:4200> | Przebiegi pipeline'u; codziennie o `PIPELINE_CRON` (UTC) |
+| Alertmanager | <http://localhost:9093> | Wysyłka alertów na Discord, wyciszenia |
 
 Migracje wykonuje jednorazowa usługa `migrate` przed startem API. CI publikuje gotowy obraz
 w GitHub Container Registry; na serwerze wystarczy ustawić `SONGLY_IMAGE` w `.env`
@@ -182,6 +183,21 @@ i pominąć `--build`.
 [ADR 0014](docs/adr/0014-monitoring-i-dashboardy.md): Prometheus zbiera metryki API
 (ruch, błędy, czasy odpowiedzi) i stan danych (wiek martów, wynik ostatniego przebiegu
 pipeline'u z `ops.pipeline_runs`). Reguły alertów mają testy (`promtool test rules`).
+
+### Alerty na Discordzie
+
+Alertmanager wysyła alerty na kanał Discorda, grupuje je, przypomina o trwających problemach
+co 4 h i informuje o naprawie ([ADR 0015](docs/adr/0015-alertmanager-discord.md)).
+
+1. W Discordzie: ustawienia kanału → Integracje → Webhooki → Nowy webhook → Kopiuj URL.
+2. W `.env` na serwerze: `DISCORD_WEBHOOK_URL=<skopiowany adres>` (to sekret, nie commituj go).
+3. `docker compose --profile full up -d`, a potem test wysyłki:
+
+```bash
+docker compose exec alertmanager amtool alert add SonglyTestAlert severity="info" --annotation='summary="Test notification from Songly Insights"' --alertmanager.url=http://localhost:9093
+```
+
+Po ok. 30 s na kanale pojawi się wiadomość `[FIRING] SonglyTestAlert`.
 
 ![Dashboard „Songly – listening”](docs/img/grafana-listening.png)
 ![Dashboard „Songly – operations”](docs/img/grafana-operations.png)
@@ -211,7 +227,8 @@ pipeline/
   musicbrainz.py   klient MusicBrainz, artyści i nagrania do raw, publikacja do katalogu
   listenbrainz.py  klient ListenBrainz, przyrostowy import odsłuchów, publikacja zdarzeń
   flows.py         flow Prefect łączący kroki
-deploy/            konfiguracja Prometheusa (alerty + testy) i Grafany (dashboardy jako JSON)
+deploy/            konfiguracja Prometheusa (alerty + testy), Alertmanagera (Discord)
+                   i Grafany (dashboardy jako JSON)
 migrations/        migracje Alembic
 tests/             testy na prawdziwym PostgreSQL
 docs/adr/          zapisy decyzji architektonicznych
@@ -245,6 +262,7 @@ GitHub Actions przy każdym pushu.
 - [ADR 0012: Podobieństwo słuchaczy](docs/adr/0012-podobienstwo-sluchaczy.md)
 - [ADR 0013: Wdrożenie w Dockerze](docs/adr/0013-wdrozenie-docker.md)
 - [ADR 0014: Monitoring i dashboardy](docs/adr/0014-monitoring-i-dashboardy.md)
+- [ADR 0015: Wysyłka alertów na Discord](docs/adr/0015-alertmanager-discord.md)
 
 ## Roadmapa
 
@@ -256,5 +274,5 @@ GitHub Actions przy każdym pushu.
    Statystyki API czytają marts.
 3. **Etap 3: analityka zachowań** (gotowe): sesje słuchania, trendy, podobieństwo słuchaczy.
 4. **Etap 4: wdrożenie i monitoring** (w toku): obraz Dockera i pełny stos w compose, obraz
-   publikowany przez CI, metryki i alerty w Prometheusie, dashboardy w Grafanie (gotowe).
-   Dalej: wysyłka alertów (Alertmanager), HTTPS, kopie zapasowe bazy, logi w formacie JSON.
+   publikowany przez CI, metryki i alerty w Prometheusie, wysyłka alertów na Discord,
+   dashboardy w Grafanie (gotowe). Dalej: HTTPS, kopie zapasowe bazy, logi w formacie JSON.

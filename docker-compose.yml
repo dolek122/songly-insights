@@ -1,5 +1,6 @@
 # Development:   docker compose up -d db            (only PostgreSQL, as before)
 # Full stack:    docker compose --profile full up -d --build
+#                (set DISCORD_WEBHOOK_URL in .env to receive alerts on Discord)
 # See ADR 0013 and the "Wdrożenie" section of README.md.
 #
 # Passwords come from .env (see .env.example). The defaults are for a local machine only.
@@ -98,11 +99,34 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=30d
+      # The address people use to open Prometheus; links in alert messages point here.
+      - --web.external-url=${PROMETHEUS_EXTERNAL_URL:-http://localhost:9090}
     ports:
       - "9090:9090"
     volumes:
       - ./deploy/prometheus:/etc/prometheus:ro
       - prometheus:/prometheus
+    depends_on:
+      - alertmanager
+    restart: unless-stopped
+
+  # Sends notifications for alerts fired by Prometheus (ADR 0015). UI on :9093.
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: [full]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      # The address people use to open Alertmanager; used in the "Alerts:" link of messages.
+      - --web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://localhost:9093}
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./deploy/alertmanager:/etc/alertmanager:ro
+      # Remembers silences and which notifications were already sent across restarts.
+      - alertmanager:/alertmanager
+    secrets:
+      - discord_webhook_url
     restart: unless-stopped
 
   grafana:
@@ -128,4 +152,12 @@ volumes:
   pgdata:
   prefect:
   prometheus:
+  alertmanager:
   grafana:
+
+# Secrets are mounted as files in /run/secrets/ of the services that ask for them, instead
+# of environment variables (which are visible e.g. in `docker inspect`).
+secrets:
+  discord_webhook_url:
+    # Read from DISCORD_WEBHOOK_URL (set it in .env).
+    environment: DISCORD_WEBHOOK_URL

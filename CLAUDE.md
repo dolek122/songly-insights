@@ -15,7 +15,7 @@ and explain non-obvious choices.
 - Pipeline: `python -m pipeline run` (add `--musicbrainz-tag jazz` / `--listenbrainz-user name`
   to import MusicBrainz / ListenBrainz; needs internet)
 - Full stack (Stage 4): `docker compose --profile full up -d --build` (API :8000, Grafana :3000,
-  Prometheus :9090, Prefect :4200); seed/pipeline via `docker compose --profile full run --rm pipeline ...`
+  Prometheus :9090, Alertmanager :9093, Prefect :4200); seed/pipeline via `docker compose --profile full run --rm pipeline ...`
 - Alert rules: `promtool test rules deploy/prometheus/alerts_test.yml` (CI runs it in Docker)
 - Tests: `pytest` (needs PostgreSQL; the schema is built from the real migrations)
 - Quality gate before every commit: `ruff check . && ruff format --check . && pytest`
@@ -80,7 +80,7 @@ and explain non-obvious choices.
 - The seed generator produces sessions and slow artist popularity trends; keep demo data realistic
   enough for new statistics to show something.
 
-## Deployment and monitoring (Stage 4, ADRs 0013 and 0014)
+## Deployment and monitoring (Stage 4, ADRs 0013-0015)
 
 - One image (`Dockerfile`) for API, migrations, pipeline and Prefect server; services in
   `docker-compose.yml` (profile `full`) differ only by command. Runs as non-root user `songly`.
@@ -90,3 +90,6 @@ and explain non-obvious choices.
   there rather than giving the pipeline its own endpoint.
 - Grafana dashboards are JSON files in `deploy/grafana/dashboards`; Postgres panels read marts as
   `grafana_reader` (granted at the end of `marts.sql`). Alert rules have promtool tests.
+- Alertmanager sends alerts to Discord (`deploy/alertmanager/`); the webhook URL is a compose
+  secret from `DISCORD_WEBHOOK_URL` (read via `webhook_url_file`), never in the repo. Every alert
+  rule needs a human-readable `summary` annotation: it is the text of the Discord message.

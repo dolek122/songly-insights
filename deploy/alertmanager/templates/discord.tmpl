@@ -1,0 +1,17 @@
+{{/*
+  Discord message templates (ADR 0015), Go template syntax.
+  .Status is "firing" or "resolved"; .Alerts are the alerts grouped into this message.
+*/}}
+
+{{ define "songly.discord.title" -}}
+[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
+{{- if gt (len .Alerts) 1 }} ({{ len .Alerts }} alerts){{ end }}
+{{- end }}
+
+{{ define "songly.discord.message" -}}
+{{ range .Alerts -}}
+**{{ .Labels.severity }}**: {{ .Annotations.summary }}
+{{ if eq .Status "firing" }}Since {{ .StartsAt.Format "2006-01-02 15:04 UTC" }}{{ else }}Resolved at {{ .EndsAt.Format "2006-01-02 15:04 UTC" }}{{ end }}
+{{ end -}}
+Alerts: {{ .ExternalURL }}
+{{- end }}

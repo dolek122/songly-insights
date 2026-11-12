@@ -1,5 +1,6 @@
-# Alert rules (ADR 0014). Without Alertmanager the alerts are visible in the Prometheus UI
-# (:9090/alerts) and in Grafana; sending them by e-mail/Slack is a next step.
+# Alert rules (ADR 0014). Prometheus evaluates them; firing alerts go to Alertmanager,
+# which sends the notifications (deploy/alertmanager/alertmanager.yml, ADR 0015).
+# `summary` is the text of the notification, so write it for a human reading a phone.
 groups:
   - name: api
     rules:

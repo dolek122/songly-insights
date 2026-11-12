@@ -1,0 +1,43 @@
+# Alertmanager: receives alerts from Prometheus and sends notifications (ADR 0015).
+#
+# Prometheus decides WHEN something is wrong (deploy/prometheus/alerts.yml).
+# Alertmanager decides WHO is told, HOW OFTEN, and groups related alerts into one message.
+
+# Our own message format (shorter than the default list of labels).
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: discord
+  # Alerts with the same name are sent together in one message.
+  group_by: [alertname]
+  # Wait a moment after the first alert, so alerts firing together arrive as one message.
+  group_wait: 30s
+  # A group that is already known: new alerts in it are sent at most every 5 minutes.
+  group_interval: 5m
+  # An alert that is still firing is sent again every 4 hours (a reminder).
+  repeat_interval: 4h
+  routes:
+    # "info" alerts (data quality warnings) are not urgent: remind only once a day.
+    - matchers: ['severity="info"']
+      receiver: discord
+      repeat_interval: 24h
+
+receivers:
+  - name: discord
+    discord_configs:
+      # The webhook URL is a secret: it comes from DISCORD_WEBHOOK_URL in .env, which
+      # docker compose puts into this file (see "secrets" in docker-compose.yml).
+      - webhook_url_file: /run/secrets/discord_webhook_url
+        # Also send a message when the problem is gone ("RESOLVED").
+        send_resolved: true
+        title: '{{ template "songly.discord.title" . }}'
+        message: '{{ template "songly.discord.message" . }}'
+
+inhibit_rules:
+  # When the database is down, data alerts are only consequences of that: do not send them.
+  - source_matchers: ['alertname="DatabaseDown"']
+    target_matchers: ['alertname=~"MartsMissing|MartsStale|PipelineFailed|DataQualityWarnings"']
+  # When the API is down, Prometheus cannot read any of its metrics: one alert is enough.
+  - source_matchers: ['alertname="ApiDown"']
+    target_matchers: ['alertname=~"DatabaseDown|HighErrorRate|SlowRequests"']

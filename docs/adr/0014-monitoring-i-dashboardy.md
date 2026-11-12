@@ -31,8 +31,8 @@ Rozwiązanie ma być standardowe i trzymane w repozytorium jako kod.
 
 ## Konsekwencje
 
-- Bez Alertmanagera alerty widać tylko w Prometheusie (:9090/alerts) i Grafanie; wysyłka
-  e-mailem lub na Slacka to kolejny krok.
+- Bez Alertmanagera alerty widać tylko w Prometheusie (:9090/alerts) i Grafanie.
+  Wysyłkę na Discord dodaje ADR 0015.
 - Dashboard produktowy liczy w SQL to samo co część API (np. odsłuchy na dzień), więc
   logika jest w dwóch miejscach. Akceptujemy to: oba czytają te same marty, a zapytania
   są proste.

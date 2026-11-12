@@ -35,6 +35,8 @@ def alembic_config() -> Config:
 def engine() -> Iterator[Engine]:
     engine = create_engine(TEST_DATABASE_URL)
     with engine.begin() as conn:
+        # Pipeline schemas first: staging views depend on tables in public.
+        conn.execute(text("DROP SCHEMA IF EXISTS marts, staging, raw CASCADE"))
         conn.execute(text("DROP SCHEMA public CASCADE"))
         conn.execute(text("CREATE SCHEMA public"))
     command.upgrade(alembic_config(), "head")
@@ -48,7 +50,10 @@ def db(engine: Engine) -> Iterator[Session]:
     with session_factory() as session:
         yield session
     with engine.begin() as conn:
-        conn.execute(text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE"))
+        tables = [*TABLES, "raw.musicbrainz_artist_search"]
+        conn.execute(text(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE"))
+        # staging and marts are fully derived; the pipeline creates them again when needed.
+        conn.execute(text("DROP SCHEMA IF EXISTS marts, staging CASCADE"))
 
 
 @pytest.fixture

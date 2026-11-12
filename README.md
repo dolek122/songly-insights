@@ -1,9 +1,10 @@
 # Songly Insights
 
-API do analizy odsłuchów muzyki: kto czego słucha, kiedy i jakich gatunków.
-Zbudowane w **FastAPI**, **SQLAlchemy 2.0**, **Alembic** i **PostgreSQL 16**.
+API do analizy odsłuchów muzyki: kto czego słucha, kiedy i jakich gatunków, oraz pipeline
+danych, który buduje z tych odsłuchów tabele analityczne i wzbogaca katalog danymi z MusicBrainz.
+Zbudowane w **FastAPI**, **SQLAlchemy 2.0**, **Alembic**, **PostgreSQL 16** i **Prefect 3**.
 
-To pierwszy etap większego projektu portfolio (zobacz [Roadmapę](#roadmapa)).
+Projekt portfolio rozwijany etapami (zobacz [Roadmapę](#roadmapa)).
 
 ## Szybki start
 
@@ -78,6 +79,37 @@ Kody: `validation_error` (422), `invalid_time_window` (422), `unknown_reference`
 `not_found` (404), `conflict` (409), `method_not_allowed` (405), `database_unavailable` (503),
 `internal_error` (500).
 
+## Pipeline danych (etap 2)
+
+```
+API (public) ──┐
+               ├─► staging (widoki) ──► marts (tabele) ──► testy jakości
+MusicBrainz ─► raw (JSON) ─┘     └─► katalog API (nowi artyści i gatunki)
+```
+
+```bash
+python -m pipeline run                                            # tylko dane z API
+python -m pipeline run --musicbrainz-tag jazz --musicbrainz-tag rock --artists-per-tag 50
+python -m pipeline serve --cron "15 3 * * *"                     # codziennie o 3:15 UTC
+```
+
+Przed importem z MusicBrainz ustaw `MUSICBRAINZ_CONTACT` w `.env` (e-mail lub adres projektu):
+MusicBrainz prosi o kontakt w nagłówku User-Agent. Historia uruchomień i logi w UI Prefecta:
+`prefect server start`.
+
+| Warstwa | Co zawiera |
+|---|---|
+| `raw` | Odpowiedzi MusicBrainz w całości (`jsonb`), tylko dopisywane; działa też jako cache |
+| `staging` | Widoki: oczyszczone dane z API i rozpakowany JSON z MusicBrainz (najnowsza wersja artysty) |
+| `marts.daily_listener_activity` | Dzień (UTC) × słuchacz: odsłuchy, unikalne utwory i artyści, czas słuchania |
+| `marts.daily_genre_plays` | Dzień (UTC) × gatunek: odsłuchy i unikalni słuchacze |
+| `marts.artist_popularity` | Artysta: odsłuchy, słuchacze, pierwszy/ostatni odsłuch, kraj i typ z MusicBrainz |
+
+Testy jakości danych (`pipeline/quality.py`) sprawdzają źródła, staging i marts, np. czy
+w marcie jest dokładnie tyle odsłuchów, ile w danych źródłowych. Błąd zatrzymuje pipeline.
+Szczegóły: [ADR 0005](docs/adr/0005-warstwy-danych-i-prefect.md),
+[ADR 0006](docs/adr/0006-import-musicbrainz.md).
+
 ## Struktura projektu
 
 ```
@@ -92,6 +124,12 @@ app/
   schemas/         modele Pydantic (kontrakt API)
   seed/            deterministyczny generator danych i loader
   cli.py           python -m app.cli seed
+pipeline/
+  sql/             definicje warstw staging i marts (czysty SQL)
+  layers.py        budowanie warstw w jednej transakcji
+  quality.py       testy jakości danych
+  musicbrainz.py   klient MusicBrainz, ładowanie do raw, publikacja do katalogu
+  flows.py         flow Prefect łączący kroki
 migrations/        migracje Alembic
 tests/             testy na prawdziwym PostgreSQL
 docs/adr/          zapisy decyzji architektonicznych
@@ -104,7 +142,8 @@ ruff check . && ruff format --check . && pytest
 ```
 
 Testy łączą się z bazą `insights_test` (`TEST_DATABASE_URL`), czyszczą ją i budują schemat
-z prawdziwych migracji. Jeden z testów porównuje modele z migracjami i nie przejdzie, jeśli
+z prawdziwych migracji. Testy pipeline'u nie łączą się z MusicBrainz (udawane odpowiedzi HTTP).
+Jeden z testów porównuje modele z migracjami i nie przejdzie, jeśli
 zmienisz model bez `alembic revision --autogenerate -m "..."`. Ten sam zestaw uruchamia
 GitHub Actions przy każdym pushu.
 
@@ -114,14 +153,16 @@ GitHub Actions przy każdym pushu.
 - [ADR 0002: Unikalność zdarzeń i idempotentny import](docs/adr/0002-unikalnosc-zdarzen-i-idempotentny-import.md)
 - [ADR 0003: Okna czasowe, dni w UTC i liczenie gatunków](docs/adr/0003-okna-czasowe-utc-i-gatunki.md)
 - [ADR 0004: Źródła danych (bez Spotify Web API)](docs/adr/0004-zrodla-danych.md)
+- [ADR 0005: Warstwy raw → staging → marts i Prefect](docs/adr/0005-warstwy-danych-i-prefect.md)
+- [ADR 0006: Import artystów z MusicBrainz](docs/adr/0006-import-musicbrainz.md)
 
 ## Roadmapa
 
 1. **Etap 1: API analityczne** (gotowe): katalog, idempotentny import odsłuchów, statystyki
    w oknach czasowych, dane syntetyczne, testy na PostgreSQL, CI.
-2. **Etap 2: pipeline danych**: warstwy raw → staging → marts w PostgreSQL, orkiestracja
-   (Airflow lub Prefect), testy jakości danych, import danych z MusicBrainz. API działa dalej
-   w trakcie budowy pipeline'u.
+2. **Etap 2: pipeline danych** (podstawa gotowa): warstwy raw → staging → marts w PostgreSQL,
+   orkiestracja w Prefect, testy jakości danych, import artystów i tagów z MusicBrainz.
+   Dalej: nagrania z MusicBrainz, opcjonalnie odsłuchy z ListenBrainz, statystyki API z marts.
 3. **Etap 3** (wstępnie): rozszerzona analityka na martach, np. trendy, sesje słuchania,
    podobieństwo słuchaczy, opcjonalnie dane z ListenBrainz.
 4. **Etap 4** (wstępnie): wdrożenie, monitoring i dashboard.

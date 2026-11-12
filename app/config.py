@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://songly:songly@localhost:5432/insights"
     test_database_url: str = "postgresql+psycopg://songly:songly@localhost:5432/insights_test"
+    # Sent in the User-Agent to MusicBrainz, which asks for a way to contact the author
+    # (an e-mail or a project URL). Optional, but please set it before real imports.
+    musicbrainz_contact: str | None = None
 
 
 @lru_cache

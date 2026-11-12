@@ -1,7 +1,7 @@
 # Songly Insights
 
-Music listening analytics API (FastAPI, SQLAlchemy 2.0 sync, Alembic, PostgreSQL 16). Stage 1 of a
-larger portfolio project; see the roadmap in README.md. The author is a junior developer who must
+Music listening analytics API (FastAPI, SQLAlchemy 2.0 sync, Alembic, PostgreSQL 16) with a
+Stage 2 data pipeline (Prefect). Portfolio project; see the roadmap in README.md. The author is a junior developer who must
 be able to explain every part of the code in an interview, so prefer simple, readable solutions
 and explain non-obvious choices.
 
@@ -12,6 +12,7 @@ and explain non-obvious choices.
 - Migrate: `alembic upgrade head`
 - Seed: `python -m app.cli seed --reset`
 - Run: `uvicorn app.main:app --reload`
+- Pipeline: `python -m pipeline run` (add `--musicbrainz-tag jazz` to import MusicBrainz; needs internet)
 - Tests: `pytest` (needs PostgreSQL; the schema is built from the real migrations)
 - Quality gate before every commit: `ruff check . && ruff format --check . && pytest`
 
@@ -34,7 +35,13 @@ and explain non-obvious choices.
 - Do not build features on the Spotify Web API: new apps lost most endpoints in 2024-2026.
   Data comes from the synthetic generator, MusicBrainz and optionally ListenBrainz (ADR 0004).
 
-## Next: Stage 2 (data pipeline)
+## Pipeline (Stage 2, see ADRs 0005 and 0006)
 
-Raw -> staging -> marts layers in PostgreSQL, orchestration (Airflow or Prefect), data quality
-tests, ingestion of MusicBrainz data. Keep the API working while the pipeline is added.
+- Schemas: `raw` (external data as received, append-only, created by migration 0002),
+  `staging` (views, clean + rename only), `marts` (analytics tables). staging and marts are
+  rebuilt from `pipeline/sql/*.sql` in one transaction on every run; edit the SQL files, not the DB.
+- Logic lives in plain modules (`pipeline/layers.py`, `quality.py`, `musicbrainz.py`);
+  `pipeline/flows.py` only wires them into Prefect tasks. Keep Prefect out of the other modules.
+- Data quality checks are SQL returning violating rows; add one for every new mart.
+- Tests never call MusicBrainz: use `tests/pipeline_helpers.py` (httpx MockTransport).
+- The API keeps reading `public`; the pipeline writes to `public` only in `publish_to_catalog`.

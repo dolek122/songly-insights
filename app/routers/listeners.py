@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.routers.deps import PaginationDep, TimeWindowDep
+from app.routers.deps import PaginationDep, StatsQueryDep
 from app.schemas.catalog import ListenerCreate, ListenerOut
 from app.schemas.common import Page
 from app.schemas.stats import ListenerSummary
@@ -28,5 +28,6 @@ def create_listener(data: ListenerCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{listener_id}/summary", response_model=ListenerSummary)
-def listener_summary(listener_id: int, window: TimeWindowDep, db: Session = Depends(get_db)):
-    return stats.listener_summary(db, listener_id, window)
+def listener_summary(listener_id: int, query: StatsQueryDep, db: Session = Depends(get_db)):
+    """Read from marts, like /stats: whole UTC days, data as of the last pipeline run."""
+    return stats.listener_summary(db, listener_id, query.window, query.data_as_of)

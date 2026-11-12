@@ -51,4 +51,5 @@ Prefecta (`layers`, `quality`, `musicbrainz`); `pipeline/flows.py` tylko je łą
 - Airflow jest popularniejszy w ogłoszeniach o pracę, ale wymaga schedulera, webservera
   i osobnej bazy metadanych. Logika jest oddzielona od Prefecta, więc migracja byłaby
   przepisaniem tylko `flows.py`.
-- API nadal czyta tabele `public`. Przełączenie statystyk API na marts to osobna decyzja.
+- API nadal czyta tabele `public`. Przełączenie statystyk API na marts to osobna decyzja
+  (podjęta w ADR 0007).

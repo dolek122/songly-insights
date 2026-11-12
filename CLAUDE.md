@@ -11,7 +11,7 @@ and explain non-obvious choices.
 - Install: `pip install -e ".[dev]"`, then `cp .env.example .env`
 - Migrate: `alembic upgrade head`
 - Seed: `python -m app.cli seed --reset`
-- Run: `uvicorn app.main:app --reload`
+- Run: `uvicorn app.main:app --reload` (statistics need `python -m pipeline run` first)
 - Pipeline: `python -m pipeline run` (add `--musicbrainz-tag jazz` to import MusicBrainz; needs internet)
 - Tests: `pytest` (needs PostgreSQL; the schema is built from the real migrations)
 - Quality gate before every commit: `ruff check . && ruff format --check . && pytest`
@@ -44,4 +44,13 @@ and explain non-obvious choices.
   `pipeline/flows.py` only wires them into Prefect tasks. Keep Prefect out of the other modules.
 - Data quality checks are SQL returning violating rows; add one for every new mart.
 - Tests never call MusicBrainz: use `tests/pipeline_helpers.py` (httpx MockTransport).
-- The API keeps reading `public`; the pipeline writes to `public` only in `publish_to_catalog`.
+- The pipeline writes to `public` only in `publish_to_catalog`.
+
+## Statistics read marts (ADR 0007)
+
+- `/stats/*` and `/listeners/{id}/summary` read `marts.listener_track_daily` (facts) joined with
+  the catalog in `public` (names). Catalog and `/listening-events` endpoints read `public`.
+- Windows must be whole UTC days (422 otherwise); responses carry `data_as_of`; missing marts
+  give 503 `marts_not_ready`. Data is as fresh as the last `python -m pipeline run`.
+- `app/marts.py` mirrors the mart columns in a separate MetaData (not Alembic): keep it in sync
+  with `pipeline/sql/marts.sql`. Tests build marts with the `build_marts` fixture.

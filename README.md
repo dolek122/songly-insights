@@ -17,6 +17,7 @@ pip install -e ".[dev]"
 cp .env.example .env
 alembic upgrade head             # schemat bazy z migracji
 python -m app.cli seed --reset   # dane syntetyczne: 25 słuchaczy, 10 000 odsłuchów
+python -m pipeline run           # buduje marts, z których API liczy statystyki
 uvicorn app.main:app --reload
 ```
 
@@ -57,6 +58,14 @@ Wszystkie poza `/health` mają prefiks `/api/v1`.
 Statystyki przyjmują `from`, `to` (okno czasowe), `listener_id` i `limit` (1–100).
 Listy przyjmują `limit` (1–200) i `offset`.
 
+**Statystyki czytają marts** zbudowane przez pipeline
+([ADR 0007](docs/adr/0007-statystyki-api-z-martow.md)):
+
+- `from` i `to` muszą być pełnymi dniami UTC (`2026-01-01` lub `2026-01-01T00:00:00Z`),
+- odpowiedź zawiera `data_as_of`, czyli czas ostatniego uruchomienia pipeline'u; nowe
+  odsłuchy z `/listening-events/bulk` są widoczne w statystykach po kolejnym uruchomieniu,
+- przed pierwszym uruchomieniem pipeline'u statystyki zwracają `503 marts_not_ready`.
+
 ### Reguły domenowe
 
 - Okno czasowe jest półotwarte: `from` włącznie, `to` wyłącznie. Daty bez strefy czasowej
@@ -77,14 +86,18 @@ Każdy błąd ma ten sam kształt:
 
 Kody: `validation_error` (422), `invalid_time_window` (422), `unknown_reference` (422),
 `not_found` (404), `conflict` (409), `method_not_allowed` (405), `database_unavailable` (503),
+`marts_not_ready` (503),
 `internal_error` (500).
 
 ## Pipeline danych (etap 2)
 
 ```
-API (public) ──┐
-               ├─► staging (widoki) ──► marts (tabele) ──► testy jakości
-MusicBrainz ─► raw (JSON) ─┘     └─► katalog API (nowi artyści i gatunki)
+API (public) ─────────────┐
+                          ├─► staging (widoki) ─► marts (tabele) ─► statystyki API
+MusicBrainz ─► raw (JSON) ┘          │
+                                     └─► katalog API (nowi artyści i gatunki)
+
+Testy jakości danych: przed staging, po staging i po marts.
 ```
 
 ```bash
@@ -101,6 +114,7 @@ MusicBrainz prosi o kontakt w nagłówku User-Agent. Historia uruchomień i logi
 |---|---|
 | `raw` | Odpowiedzi MusicBrainz w całości (`jsonb`), tylko dopisywane; działa też jako cache |
 | `staging` | Widoki: oczyszczone dane z API i rozpakowany JSON z MusicBrainz (najnowsza wersja artysty) |
+| `marts.listener_track_daily` | Dzień (UTC) × słuchacz × utwór: odsłuchy, czas, pierwszy/ostatni odsłuch. Źródło statystyk API |
 | `marts.daily_listener_activity` | Dzień (UTC) × słuchacz: odsłuchy, unikalne utwory i artyści, czas słuchania |
 | `marts.daily_genre_plays` | Dzień (UTC) × gatunek: odsłuchy i unikalni słuchacze |
 | `marts.artist_popularity` | Artysta: odsłuchy, słuchacze, pierwszy/ostatni odsłuch, kraj i typ z MusicBrainz |
@@ -118,6 +132,7 @@ app/
   config.py        ustawienia z .env (pydantic-settings)
   db.py            silnik, sesje, Base z konwencją nazw ograniczeń
   models.py        modele SQLAlchemy
+  marts.py         tabele martów czytane przez statystyki (tworzy je pipeline, nie Alembic)
   errors.py        wspólny format błędów
   routers/         warstwa HTTP (cienka): parametry -> serwis -> odpowiedź
   services/        logika i zapytania: katalog, import odsłuchów, statystyki, okno czasowe
@@ -155,6 +170,7 @@ GitHub Actions przy każdym pushu.
 - [ADR 0004: Źródła danych (bez Spotify Web API)](docs/adr/0004-zrodla-danych.md)
 - [ADR 0005: Warstwy raw → staging → marts i Prefect](docs/adr/0005-warstwy-danych-i-prefect.md)
 - [ADR 0006: Import artystów z MusicBrainz](docs/adr/0006-import-musicbrainz.md)
+- [ADR 0007: Statystyki API czytane z martów](docs/adr/0007-statystyki-api-z-martow.md)
 
 ## Roadmapa
 
@@ -162,7 +178,8 @@ GitHub Actions przy każdym pushu.
    w oknach czasowych, dane syntetyczne, testy na PostgreSQL, CI.
 2. **Etap 2: pipeline danych** (podstawa gotowa): warstwy raw → staging → marts w PostgreSQL,
    orkiestracja w Prefect, testy jakości danych, import artystów i tagów z MusicBrainz.
-   Dalej: nagrania z MusicBrainz, opcjonalnie odsłuchy z ListenBrainz, statystyki API z marts.
+   Statystyki API czytają marts.
+   Dalej: nagrania z MusicBrainz, opcjonalnie odsłuchy z ListenBrainz.
 3. **Etap 3** (wstępnie): rozszerzona analityka na martach, np. trendy, sesje słuchania,
    podobieństwo słuchaczy, opcjonalnie dane z ListenBrainz.
 4. **Etap 4** (wstępnie): wdrożenie, monitoring i dashboard.

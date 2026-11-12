@@ -36,29 +36,30 @@ class DailyPlays(BaseModel):
     plays: int
 
 
-class TopTracksResponse(BaseModel):
+class StatsResponse(BaseModel):
     window: Window
+    # Statistics come from marts, which are as fresh as the last pipeline run (ADR 0007).
+    data_as_of: datetime
+
+
+class TopTracksResponse(StatsResponse):
     items: list[TopTrack]
 
 
-class TopArtistsResponse(BaseModel):
-    window: Window
+class TopArtistsResponse(StatsResponse):
     items: list[TopArtist]
 
 
-class TopGenresResponse(BaseModel):
-    window: Window
+class TopGenresResponse(StatsResponse):
     items: list[TopGenre]
 
 
-class DailyPlaysResponse(BaseModel):
-    window: Window
+class DailyPlaysResponse(StatsResponse):
     items: list[DailyPlays]
 
 
-class ListenerSummary(BaseModel):
+class ListenerSummary(StatsResponse):
     listener_id: int
-    window: Window
     total_plays: int
     unique_tracks: int
     unique_artists: int

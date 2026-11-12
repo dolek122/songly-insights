@@ -41,6 +41,13 @@ class ConflictError(AppError):
     code = "conflict"
 
 
+class MartsNotReadyError(AppError):
+    """Statistics are read from marts, which exist only after the pipeline has run once."""
+
+    status_code = 503
+    code = "marts_not_ready"
+
+
 class UnprocessableError(AppError):
     """Input is well-formed but breaks a business rule (e.g. `from` after `to`)."""
 

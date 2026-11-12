@@ -92,6 +92,18 @@ MART_CHECKS = [
         """,
     ),
     Check(
+        "listener_track_daily_matches_events",
+        """
+        SELECT 1
+        WHERE (SELECT coalesce(sum(plays), 0) FROM marts.listener_track_daily)
+           <> (SELECT count(*) FROM staging.listening_events)
+        """,
+    ),
+    Check(
+        "listener_track_daily_first_before_last",
+        "SELECT day FROM marts.listener_track_daily WHERE first_listened_at > last_listened_at",
+    ),
+    Check(
         "artist_popularity_listeners_not_above_plays",
         "SELECT artist_id FROM marts.artist_popularity WHERE unique_listeners > total_plays",
     ),

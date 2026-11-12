@@ -8,6 +8,27 @@
 DROP SCHEMA IF EXISTS marts CASCADE;
 CREATE SCHEMA marts;
 
+-- One row per (UTC day, listener, track). The API statistics read this table (ADR 0007).
+-- It keeps track_id on purpose: "unique tracks in a window" cannot be computed by adding
+-- daily unique counts (the same track on two days would be counted twice).
+CREATE TABLE marts.listener_track_daily AS
+SELECT
+    e.listened_date AS day,
+    e.listener_id,
+    e.track_id,
+    t.artist_id,
+    count(*) AS plays,
+    count(*) * t.duration_ms AS listening_ms,
+    min(e.listened_at) AS first_listened_at,
+    max(e.listened_at) AS last_listened_at
+FROM staging.listening_events AS e
+JOIN staging.tracks AS t ON t.track_id = e.track_id
+GROUP BY e.listened_date, e.listener_id, e.track_id, t.artist_id, t.duration_ms;
+
+ALTER TABLE marts.listener_track_daily ADD PRIMARY KEY (day, listener_id, track_id);
+-- The API filters by listener and day range; the primary key already covers day-first lookups.
+CREATE INDEX ix_listener_track_daily_listener_day ON marts.listener_track_daily (listener_id, day);
+
 -- One row per (UTC day, listener).
 CREATE TABLE marts.daily_listener_activity AS
 SELECT
@@ -59,3 +80,7 @@ LEFT JOIN staging.musicbrainz_artists AS mb ON mb.mbid = a.mbid
 GROUP BY a.artist_id, a.artist_name, a.mbid, mb.country, mb.artist_type;
 
 ALTER TABLE marts.artist_popularity ADD PRIMARY KEY (artist_id);
+
+-- When were the marts built? now() is the start of this transaction, i.e. the data in the
+-- marts is complete up to this moment. The API returns it as `data_as_of`.
+CREATE TABLE marts.build_info AS SELECT now() AS built_at;

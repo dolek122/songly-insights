@@ -21,6 +21,7 @@ from app.db import get_db
 from app.main import create_app
 from app.models import Artist, Genre, Listener, ListeningEvent, Track
 from app.seed.loader import TABLES
+from pipeline import layers
 
 TEST_DATABASE_URL = get_settings().test_database_url
 
@@ -59,7 +60,14 @@ def db(engine: Engine) -> Iterator[Session]:
 @pytest.fixture
 def client(db: Session) -> Iterator[TestClient]:
     app = create_app()
-    app.dependency_overrides[get_db] = lambda: db
+
+    def test_db() -> Iterator[Session]:
+        yield db
+        # A real request closes its session; that ends its transaction and releases its
+        # locks. Without this, a read of the marts would block the next pipeline rebuild.
+        db.rollback()
+
+    app.dependency_overrides[get_db] = test_db
     with TestClient(app) as test_client:
         yield test_client
 
@@ -98,6 +106,17 @@ class Factory:
 @pytest.fixture
 def factory(db: Session) -> Factory:
     return Factory(db)
+
+
+@pytest.fixture
+def build_marts(engine: Engine):
+    """Run the pipeline's SQL (staging + marts). Statistics endpoints read the marts."""
+
+    def build() -> None:
+        layers.build_staging(engine)
+        layers.build_marts(engine)
+
+    return build
 
 
 def assert_error(response, status: int, code: str) -> dict:

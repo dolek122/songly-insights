@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.routers.deps import PaginationDep, StatsQueryDep
+from app.routers.deps import PaginationDep, StatsQueryDep, TopLimit
 from app.schemas.catalog import ListenerCreate, ListenerOut
 from app.schemas.common import Page
-from app.schemas.stats import ListenerSessionsResponse, ListenerSummary
-from app.services import catalog, sessions, stats
+from app.schemas.stats import ListenerSessionsResponse, ListenerSummary, SimilarListenersResponse
+from app.services import catalog, sessions, similarity, stats
 
 router = APIRouter(prefix="/listeners", tags=["listeners"])
 
@@ -46,5 +46,19 @@ def listener_sessions(
         total=total,
         limit=page.limit,
         offset=page.offset,
+        items=items,
+    )
+
+
+@router.get("/{listener_id}/similar", response_model=SimilarListenersResponse)
+def similar_listeners(
+    listener_id: int, query: StatsQueryDep, limit: TopLimit = 10, db: Session = Depends(get_db)
+):
+    """Listeners with the most similar taste (cosine similarity of artist plays, ADR 0012)."""
+    items = similarity.similar_listeners(db, listener_id, query.window, limit)
+    return SimilarListenersResponse(
+        listener_id=listener_id,
+        window=stats.window_out(query.window),
+        data_as_of=query.data_as_of,
         items=items,
     )

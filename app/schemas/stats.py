@@ -118,3 +118,26 @@ class TrendResponse(StatsResponse):
     previous_window: Window
     direction: str
     items: list[TrendItem]
+
+
+# --- similarity (ADR 0012) ------------------------------------------------------------------
+
+
+class SharedArtist(BaseModel):
+    artist_id: int
+    name: str
+
+
+class SimilarListener(BaseModel):
+    listener_id: int
+    username: str
+    # Cosine similarity of artist play counts: 1.0 = the same taste, 0 = nothing in common.
+    similarity: float
+    shared_artists: int
+    # Artists both listen to the most: explains why they are similar.
+    top_shared_artists: list[SharedArtist]
+
+
+class SimilarListenersResponse(StatsResponse):
+    listener_id: int
+    items: list[SimilarListener]

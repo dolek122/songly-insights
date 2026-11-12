@@ -64,12 +64,15 @@ and explain non-obvious choices.
 - `app/marts.py` mirrors the mart columns in a separate MetaData (not Alembic): keep it in sync
   with `pipeline/sql/marts.sql`. Tests build marts with the `build_marts` fixture.
 
-## Sessions and trends (Stage 3, ADRs 0010 and 0011)
+## Sessions, trends and similarity (Stage 3, ADRs 0010-0012)
 
 - Sessions: `marts.listening_sessions` (gaps and islands, 30-minute gap, identified by
   listener + start, belong to the UTC day they started). Service: `app/services/sessions.py`.
 - Trends: current window vs the previous window of the same length, ranked by absolute change;
   computed in `app/services/trends.py` from `listener_track_daily` (no extra mart).
+- Similarity: cosine similarity of (artist -> plays) vectors, computed on request in
+  `app/services/similarity.py` (CTEs over `listener_track_daily`); results explain themselves
+  with `top_shared_artists`.
 - `stats.filter_days()` applies window + listener filters to any mart with `day`/`listener_id`.
 - The seed generator produces sessions and slow artist popularity trends; keep demo data realistic
   enough for new statistics to show something.

@@ -59,6 +59,7 @@ Wszystkie poza `/health` mają prefiks `/api/v1`.
 | GET | `/stats/trending-artists` | Artyści z największym wzrostem (`direction=falling`: spadkiem) względem poprzedniego okna |
 | GET | `/stats/trending-genres` | To samo dla gatunków |
 | GET | `/listeners/{id}/sessions` | Sesje słuchacza, od najnowszych (paginacja) |
+| GET | `/listeners/{id}/similar` | Słuchacze o najbardziej podobnym guście, ze wspólnymi artystami |
 
 Statystyki przyjmują `from`, `to` (okno czasowe), `listener_id` i `limit` (1–100).
 Listy przyjmują `limit` (1–200) i `offset`.
@@ -71,7 +72,7 @@ Listy przyjmują `limit` (1–200) i `offset`.
   odsłuchy z `/listening-events/bulk` są widoczne w statystykach po kolejnym uruchomieniu,
 - przed pierwszym uruchomieniem pipeline'u statystyki zwracają `503 marts_not_ready`.
 
-### Sesje i trendy (etap 3)
+### Sesje, trendy i podobieństwo (etap 3)
 
 - **Sesja** to ciąg odsłuchów, w którym kolejny utwór zaczyna się najwyżej 30 minut po
   poprzednim. Sesja należy do dnia UTC, w którym się zaczęła
@@ -79,11 +80,15 @@ Listy przyjmują `limit` (1–200) i `offset`.
 - **Trend** porównuje okno z poprzednim oknem tej samej długości, np. ostatni tydzień
   z tygodniem wcześniej; ranking według bezwzględnej zmiany liczby odsłuchów
   ([ADR 0011](docs/adr/0011-trendy.md)).
+- **Podobieństwo słuchaczy** to podobieństwo kosinusowe wektorów „artysta → liczba odsłuchów”
+  (1,0 = te same proporcje). Wynik zawiera wspólnych artystów, którzy wyjaśniają podobieństwo
+  ([ADR 0012](docs/adr/0012-podobienstwo-sluchaczy.md)).
 
 ```bash
 curl "localhost:8000/api/v1/stats/trending-artists?from=2025-12-02&to=2026-01-01&limit=5"
 curl "localhost:8000/api/v1/stats/sessions?from=2025-12-01&to=2026-01-01"
 curl "localhost:8000/api/v1/listeners/1/sessions?limit=5"
+curl "localhost:8000/api/v1/listeners/1/similar?limit=3"
 ```
 
 ### Reguły domenowe
@@ -159,7 +164,8 @@ app/
   marts.py         tabele martów czytane przez statystyki (tworzy je pipeline, nie Alembic)
   errors.py        wspólny format błędów
   routers/         warstwa HTTP (cienka): parametry -> serwis -> odpowiedź
-  services/        logika i zapytania: katalog, import odsłuchów, statystyki, sesje, trendy
+  services/        logika i zapytania: katalog, import odsłuchów, statystyki, sesje, trendy,
+                   podobieństwo słuchaczy
   schemas/         modele Pydantic (kontrakt API)
   seed/            deterministyczny generator danych i loader
   cli.py           python -m app.cli seed
@@ -201,6 +207,7 @@ GitHub Actions przy każdym pushu.
 - [ADR 0009: Odsłuchy z ListenBrainz](docs/adr/0009-odsluchy-z-listenbrainz.md)
 - [ADR 0010: Sesje słuchania](docs/adr/0010-sesje-sluchania.md)
 - [ADR 0011: Trendy](docs/adr/0011-trendy.md)
+- [ADR 0012: Podobieństwo słuchaczy](docs/adr/0012-podobienstwo-sluchaczy.md)
 
 ## Roadmapa
 
@@ -210,6 +217,5 @@ GitHub Actions przy każdym pushu.
    orkiestracja w Prefect, testy jakości danych, import artystów, tagów i nagrań z MusicBrainz,
    przyrostowy import odsłuchów z ListenBrainz.
    Statystyki API czytają marts.
-3. **Etap 3: analityka zachowań** (w toku): sesje słuchania i trendy (gotowe).
-   Dalej: podobieństwo słuchaczy.
+3. **Etap 3: analityka zachowań** (gotowe): sesje słuchania, trendy, podobieństwo słuchaczy.
 4. **Etap 4** (wstępnie): wdrożenie, monitoring i dashboard.

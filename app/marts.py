@@ -30,3 +30,18 @@ build_info = Table(
     marts_metadata,
     Column("built_at", DateTime(timezone=True)),
 )
+
+# One row per listening session (ADR 0010). (listener_id, started_at) identifies a session.
+listening_sessions = Table(
+    "listening_sessions",
+    marts_metadata,
+    Column("listener_id", Integer, primary_key=True),
+    Column("started_at", DateTime(timezone=True), primary_key=True),
+    Column("last_play_at", DateTime(timezone=True)),
+    Column("ended_at", DateTime(timezone=True)),
+    Column("day", Date),
+    Column("plays", BigInteger),
+    Column("unique_tracks", BigInteger),
+    Column("unique_artists", BigInteger),
+    Column("listening_ms", BigInteger),
+)

@@ -1,7 +1,7 @@
 # Songly Insights
 
 Music listening analytics API (FastAPI, SQLAlchemy 2.0 sync, Alembic, PostgreSQL 16) with a
-Stage 2 data pipeline (Prefect). Portfolio project; see the roadmap in README.md. The author is a junior developer who must
+Stage 2 data pipeline (Prefect) and Stage 3 behaviour analytics. Portfolio project; see the roadmap in README.md. The author is a junior developer who must
 be able to explain every part of the code in an interview, so prefer simple, readable solutions
 and explain non-obvious choices.
 
@@ -63,3 +63,13 @@ and explain non-obvious choices.
   give 503 `marts_not_ready`. Data is as fresh as the last `python -m pipeline run`.
 - `app/marts.py` mirrors the mart columns in a separate MetaData (not Alembic): keep it in sync
   with `pipeline/sql/marts.sql`. Tests build marts with the `build_marts` fixture.
+
+## Sessions and trends (Stage 3, ADRs 0010 and 0011)
+
+- Sessions: `marts.listening_sessions` (gaps and islands, 30-minute gap, identified by
+  listener + start, belong to the UTC day they started). Service: `app/services/sessions.py`.
+- Trends: current window vs the previous window of the same length, ranked by absolute change;
+  computed in `app/services/trends.py` from `listener_track_daily` (no extra mart).
+- `stats.filter_days()` applies window + listener filters to any mart with `day`/`listener_id`.
+- The seed generator produces sessions and slow artist popularity trends; keep demo data realistic
+  enough for new statistics to show something.

@@ -146,6 +146,33 @@ MART_CHECKS = [
         severity="warn",
     ),
     Check(
+        "listening_sessions_match_events",
+        """
+        SELECT 1
+        WHERE (SELECT coalesce(sum(plays), 0) FROM marts.listening_sessions)
+           <> (SELECT count(*) FROM staging.listening_events)
+        """,
+    ),
+    Check(
+        # The session rule itself: two sessions of a listener must be more than 30 minutes
+        # apart (from the last play of one to the first play of the next).
+        "listening_sessions_separated_by_gap",
+        """
+        SELECT started_at
+        FROM (
+            SELECT
+                started_at,
+                lag(last_play_at) OVER (PARTITION BY listener_id ORDER BY started_at) AS prev
+            FROM marts.listening_sessions
+        ) AS ordered
+        WHERE started_at - prev <= interval '30 minutes'
+        """,
+    ),
+    Check(
+        "listening_sessions_end_after_start",
+        "SELECT listener_id FROM marts.listening_sessions WHERE ended_at < started_at",
+    ),
+    Check(
         "artist_popularity_listeners_not_above_plays",
         "SELECT artist_id FROM marts.artist_popularity WHERE unique_listeners > total_plays",
     ),

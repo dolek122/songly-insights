@@ -5,8 +5,8 @@ from app.db import get_db
 from app.routers.deps import PaginationDep, StatsQueryDep
 from app.schemas.catalog import ListenerCreate, ListenerOut
 from app.schemas.common import Page
-from app.schemas.stats import ListenerSummary
-from app.services import catalog, stats
+from app.schemas.stats import ListenerSessionsResponse, ListenerSummary
+from app.services import catalog, sessions, stats
 
 router = APIRouter(prefix="/listeners", tags=["listeners"])
 
@@ -31,3 +31,20 @@ def create_listener(data: ListenerCreate, db: Session = Depends(get_db)):
 def listener_summary(listener_id: int, query: StatsQueryDep, db: Session = Depends(get_db)):
     """Read from marts, like /stats: whole UTC days, data as of the last pipeline run."""
     return stats.listener_summary(db, listener_id, query.window, query.data_as_of)
+
+
+@router.get("/{listener_id}/sessions", response_model=ListenerSessionsResponse)
+def listener_sessions(
+    listener_id: int, query: StatsQueryDep, page: PaginationDep, db: Session = Depends(get_db)
+):
+    """Listening sessions of one listener, newest first (ADR 0010)."""
+    items, total = sessions.list_sessions(db, listener_id, query.window, page.limit, page.offset)
+    return ListenerSessionsResponse(
+        listener_id=listener_id,
+        window=stats.window_out(query.window),
+        data_as_of=query.data_as_of,
+        total=total,
+        limit=page.limit,
+        offset=page.offset,
+        items=items,
+    )

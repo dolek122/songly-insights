@@ -81,6 +81,66 @@ GROUP BY a.artist_id, a.artist_name, a.mbid, mb.country, mb.artist_type;
 
 ALTER TABLE marts.artist_popularity ADD PRIMARY KEY (artist_id);
 
+-- Listening sessions (ADR 0010): one row per session of a listener.
+-- A session is a run of plays where each play starts at most 30 minutes after the
+-- previous one. This is the "gaps and islands" pattern:
+--   1. lag() puts the previous play's time next to every play,
+--   2. a play starts a new session when there is no previous play or the gap is too big,
+--   3. a running sum of those "new session" flags numbers the sessions (1, 1, 1, 2, 2, 3, ...),
+--   4. GROUP BY that number collapses each session into one row.
+CREATE TABLE marts.listening_sessions AS
+WITH plays AS (
+    SELECT
+        e.event_id,
+        e.listener_id,
+        e.track_id,
+        e.listened_at,
+        t.artist_id,
+        t.duration_ms,
+        lag(e.listened_at) OVER (
+            PARTITION BY e.listener_id ORDER BY e.listened_at, e.event_id
+        ) AS previous_listened_at
+    FROM staging.listening_events AS e
+    JOIN staging.tracks AS t ON t.track_id = e.track_id
+),
+flagged AS (
+    SELECT
+        *,
+        CASE
+            WHEN previous_listened_at IS NULL THEN 1
+            WHEN listened_at - previous_listened_at > interval '30 minutes' THEN 1
+            ELSE 0
+        END AS starts_session
+    FROM plays
+),
+numbered AS (
+    SELECT
+        *,
+        sum(starts_session) OVER (
+            PARTITION BY listener_id ORDER BY listened_at, event_id
+        ) AS session_number
+    FROM flagged
+)
+SELECT
+    listener_id,
+    min(listened_at) AS started_at,
+    max(listened_at) AS last_play_at,
+    -- The session ends when its last track ends. Unknown length: the moment it started.
+    max(listened_at + make_interval(secs => coalesce(duration_ms, 0) / 1000.0)) AS ended_at,
+    -- A session belongs to the UTC day it started on (also when it runs past midnight).
+    (min(listened_at) AT TIME ZONE 'UTC')::date AS day,
+    count(*) AS plays,
+    count(DISTINCT track_id) AS unique_tracks,
+    count(DISTINCT artist_id) AS unique_artists,
+    sum(duration_ms) AS listening_ms
+FROM numbered
+GROUP BY listener_id, session_number;
+
+-- session_number is not kept: it changes when older plays are imported later.
+-- (listener, start time) identifies a session and stays the same.
+ALTER TABLE marts.listening_sessions ADD PRIMARY KEY (listener_id, started_at);
+CREATE INDEX ix_listening_sessions_day ON marts.listening_sessions (day);
+
 -- When were the marts built? now() is the start of this transaction, i.e. the data in the
 -- marts is complete up to this moment. The API returns it as `data_as_of`.
 CREATE TABLE marts.build_info AS SELECT now() AS built_at;

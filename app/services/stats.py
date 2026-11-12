@@ -10,7 +10,7 @@ Results with equal play counts are ordered by id, so the output is deterministic
 
 from datetime import datetime, time, timedelta
 
-from sqlalchemy import BigInteger, Select, cast, func, select, text
+from sqlalchemy import BigInteger, Select, Table, cast, func, select, text
 from sqlalchemy.orm import Session
 
 from app.errors import MartsNotReadyError, UnprocessableError
@@ -24,7 +24,7 @@ from app.services.time_window import TimeWindow
 MAX_DAILY_RANGE_DAYS = 366
 
 
-def _total(column):
+def total(column):
     # SUM over a bigint column returns `numeric` in PostgreSQL; cast it back to an integer.
     return cast(func.sum(column), BigInteger)
 
@@ -50,14 +50,19 @@ def marts_built_at(session: Session) -> datetime:
     return session.scalar(select(build_info.c.built_at))
 
 
-def _filtered(stmt: Select, window: TimeWindow, listener_id: int | None) -> Select:
-    """Add the window (as days; `to` stays exclusive) and the optional listener filter."""
+def filter_days(
+    stmt: Select, window: TimeWindow, listener_id: int | None, table: Table = facts
+) -> Select:
+    """Add the window (as days; `to` stays exclusive) and the optional listener filter.
+
+    Works for every mart with `day` and `listener_id` columns.
+    """
     if window.from_ is not None:
-        stmt = stmt.where(facts.c.day >= window.from_.date())
+        stmt = stmt.where(table.c.day >= window.from_.date())
     if window.to is not None:
-        stmt = stmt.where(facts.c.day < window.to.date())
+        stmt = stmt.where(table.c.day < window.to.date())
     if listener_id is not None:
-        stmt = stmt.where(facts.c.listener_id == listener_id)
+        stmt = stmt.where(table.c.listener_id == listener_id)
     return stmt
 
 
@@ -68,7 +73,7 @@ def window_out(window: TimeWindow) -> Window:
 def top_tracks(
     session: Session, window: TimeWindow, limit: int, listener_id: int | None = None
 ) -> list[TopTrack]:
-    plays = _total(facts.c.plays).label("plays")
+    plays = total(facts.c.plays).label("plays")
     stmt = (
         select(Track.id, Track.title, Artist.id, Artist.name, plays)
         .select_from(facts)
@@ -78,7 +83,7 @@ def top_tracks(
         .order_by(plays.desc(), Track.id)
         .limit(limit)
     )
-    rows = session.execute(_filtered(stmt, window, listener_id))
+    rows = session.execute(filter_days(stmt, window, listener_id))
     return [
         TopTrack(track_id=t_id, title=title, artist_id=a_id, artist_name=a_name, plays=n)
         for t_id, title, a_id, a_name, n in rows
@@ -88,7 +93,7 @@ def top_tracks(
 def top_artists(
     session: Session, window: TimeWindow, limit: int, listener_id: int | None = None
 ) -> list[TopArtist]:
-    plays = _total(facts.c.plays).label("plays")
+    plays = total(facts.c.plays).label("plays")
     stmt = (
         select(Artist.id, Artist.name, plays)
         .select_from(facts)
@@ -97,7 +102,7 @@ def top_artists(
         .order_by(plays.desc(), Artist.id)
         .limit(limit)
     )
-    rows = session.execute(_filtered(stmt, window, listener_id))
+    rows = session.execute(filter_days(stmt, window, listener_id))
     return [TopArtist(artist_id=a_id, name=name, plays=n) for a_id, name, n in rows]
 
 
@@ -107,7 +112,7 @@ def top_genres(
     # The join with artist_genres turns one row of an artist with 2 genres into 2 rows,
     # so the plays count towards both genres (ADR 0003). The sum over genres can therefore
     # be larger than the number of plays. Artists without genres are not counted here.
-    plays = _total(facts.c.plays).label("plays")
+    plays = total(facts.c.plays).label("plays")
     stmt = (
         select(Genre.id, Genre.name, plays)
         .select_from(facts)
@@ -117,7 +122,7 @@ def top_genres(
         .order_by(plays.desc(), Genre.id)
         .limit(limit)
     )
-    rows = session.execute(_filtered(stmt, window, listener_id))
+    rows = session.execute(filter_days(stmt, window, listener_id))
     return [TopGenre(genre_id=g_id, name=name, plays=n) for g_id, name, n in rows]
 
 
@@ -137,8 +142,8 @@ def daily_plays(
             code="invalid_time_window",
         )
 
-    stmt = select(facts.c.day, _total(facts.c.plays)).group_by(facts.c.day)
-    counts = dict(session.execute(_filtered(stmt, window, listener_id)).all())
+    stmt = select(facts.c.day, total(facts.c.plays)).group_by(facts.c.day)
+    counts = dict(session.execute(filter_days(stmt, window, listener_id)).all())
 
     # Fill the gaps in Python: simpler to read than generate_series() in SQL.
     result = []
@@ -155,16 +160,16 @@ def listener_summary(
     catalog.get_listener(session, listener_id)  # 404 when the listener does not exist
 
     stmt = select(
-        func.coalesce(_total(facts.c.plays), 0),
+        func.coalesce(total(facts.c.plays), 0),
         # Distinct counts are why the mart keeps track_id: they cannot be added up per day.
         func.count(func.distinct(facts.c.track_id)),
         func.count(func.distinct(facts.c.artist_id)),
-        func.coalesce(_total(facts.c.listening_ms), 0),
+        func.coalesce(total(facts.c.listening_ms), 0),
         func.min(facts.c.first_listened_at),
         func.max(facts.c.last_listened_at),
     )
     plays, tracks, artists, total_ms, first, last = session.execute(
-        _filtered(stmt, window, listener_id)
+        filter_days(stmt, window, listener_id)
     ).one()
 
     best_artist = top_artists(session, window, limit=1, listener_id=listener_id)

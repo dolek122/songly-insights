@@ -1,0 +1,75 @@
+# Alert rules (ADR 0014). Without Alertmanager the alerts are visible in the Prometheus UI
+# (:9090/alerts) and in Grafana; sending them by e-mail/Slack is a next step.
+groups:
+  - name: api
+    rules:
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The API does not answer /metrics.
+
+      - alert: DatabaseDown
+        expr: songly_database_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: The API cannot query PostgreSQL.
+
+      - alert: HighErrorRate
+        # Share of 5xx answers among all answers over the last 5 minutes.
+        expr: |
+          sum(rate(songly_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(songly_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 5% of API requests fail with a server error.
+
+      - alert: SlowRequests
+        # 95% of requests are faster than this value.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(songly_http_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: The 95th percentile of request time is above 1 second.
+
+  - name: data
+    rules:
+      - alert: MartsMissing
+        expr: songly_marts_built == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Marts do not exist; statistics endpoints answer 503. Run the pipeline.
+
+      - alert: MartsStale
+        # The pipeline runs daily; 26 hours leaves room for a slow or late run.
+        expr: songly_marts_age_seconds > 26 * 3600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Marts are older than 26 hours; the daily pipeline did not finish.
+
+      - alert: PipelineFailed
+        expr: songly_pipeline_last_run_failed == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: The newest pipeline run failed (see the Prefect UI on :4200).
+
+      - alert: DataQualityWarnings
+        expr: songly_pipeline_dq_warnings > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $value }} data quality warnings in the newest pipeline run."

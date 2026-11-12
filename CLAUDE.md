@@ -14,6 +14,9 @@ and explain non-obvious choices.
 - Run: `uvicorn app.main:app --reload` (statistics need `python -m pipeline run` first)
 - Pipeline: `python -m pipeline run` (add `--musicbrainz-tag jazz` / `--listenbrainz-user name`
   to import MusicBrainz / ListenBrainz; needs internet)
+- Full stack (Stage 4): `docker compose --profile full up -d --build` (API :8000, Grafana :3000,
+  Prometheus :9090, Prefect :4200); seed/pipeline via `docker compose --profile full run --rm pipeline ...`
+- Alert rules: `promtool test rules deploy/prometheus/alerts_test.yml` (CI runs it in Docker)
 - Tests: `pytest` (needs PostgreSQL; the schema is built from the real migrations)
 - Quality gate before every commit: `ruff check . && ruff format --check . && pytest`
 
@@ -76,3 +79,14 @@ and explain non-obvious choices.
 - `stats.filter_days()` applies window + listener filters to any mart with `day`/`listener_id`.
 - The seed generator produces sessions and slow artist popularity trends; keep demo data realistic
   enough for new statistics to show something.
+
+## Deployment and monitoring (Stage 4, ADRs 0013 and 0014)
+
+- One image (`Dockerfile`) for API, migrations, pipeline and Prefect server; services in
+  `docker-compose.yml` (profile `full`) differ only by command. Runs as non-root user `songly`.
+- `/metrics` (app/metrics.py): HTTP counters/histogram labelled by route template; data gauges
+  refreshed from the DB on each scrape (app/services/monitoring.py). One uvicorn worker.
+- Every pipeline run is recorded in `ops.pipeline_runs` (pipeline/runs.py); add new metrics
+  there rather than giving the pipeline its own endpoint.
+- Grafana dashboards are JSON files in `deploy/grafana/dashboards`; Postgres panels read marts as
+  `grafana_reader` (granted at the end of `marts.sql`). Alert rules have promtool tests.

@@ -3,7 +3,8 @@
 API do analizy odsłuchów muzyki: kto czego słucha, kiedy i jakich gatunków, oraz pipeline
 danych, który buduje z tych odsłuchów tabele analityczne, wzbogaca katalog danymi z MusicBrainz
 i importuje prawdziwe odsłuchy z ListenBrainz.
-Zbudowane w **FastAPI**, **SQLAlchemy 2.0**, **Alembic**, **PostgreSQL 16** i **Prefect 3**.
+Zbudowane w **FastAPI**, **SQLAlchemy 2.0**, **Alembic**, **PostgreSQL 16** i **Prefect 3**;
+wdrażane w **Dockerze**, monitorowane przez **Prometheus** i **Grafanę**.
 
 Projekt portfolio rozwijany etapami (zobacz [Roadmapę](#roadmapa)).
 
@@ -153,6 +154,38 @@ w marcie jest dokładnie tyle odsłuchów, ile w danych źródłowych. Błąd za
 Szczegóły: [ADR 0005](docs/adr/0005-warstwy-danych-i-prefect.md),
 [ADR 0006](docs/adr/0006-import-musicbrainz.md).
 
+## Wdrożenie (etap 4)
+
+Cały system w Dockerze: API, PostgreSQL, pipeline z harmonogramem, Prefect, Prometheus
+i Grafana ([ADR 0013](docs/adr/0013-wdrozenie-docker.md)).
+
+```bash
+cp .env.example .env      # na serwerze: zmień wszystkie hasła!
+docker compose --profile full up -d --build
+docker compose --profile full run --rm pipeline python -m app.cli seed --reset --end-date today
+docker compose --profile full run --rm pipeline python -m pipeline run
+```
+
+| Usługa | Adres | Co robi |
+|---|---|---|
+| API | <http://localhost:8000/docs> | Endpointy; `/metrics` dla Prometheusa |
+| Grafana | <http://localhost:3000> (admin / `GRAFANA_ADMIN_PASSWORD`) | Dashboardy w folderze „Songly Insights” |
+| Prometheus | <http://localhost:9090/alerts> | Metryki i alerty |
+| Prefect | <http://localhost:4200> | Przebiegi pipeline'u; codziennie o `PIPELINE_CRON` (UTC) |
+
+Migracje wykonuje jednorazowa usługa `migrate` przed startem API. CI publikuje gotowy obraz
+w GitHub Container Registry; na serwerze wystarczy ustawić `SONGLY_IMAGE` w `.env`
+i pominąć `--build`.
+
+## Monitoring i dashboardy
+
+[ADR 0014](docs/adr/0014-monitoring-i-dashboardy.md): Prometheus zbiera metryki API
+(ruch, błędy, czasy odpowiedzi) i stan danych (wiek martów, wynik ostatniego przebiegu
+pipeline'u z `ops.pipeline_runs`). Reguły alertów mają testy (`promtool test rules`).
+
+![Dashboard „Songly – listening”](docs/img/grafana-listening.png)
+![Dashboard „Songly – operations”](docs/img/grafana-operations.png)
+
 ## Struktura projektu
 
 ```
@@ -165,7 +198,8 @@ app/
   errors.py        wspólny format błędów
   routers/         warstwa HTTP (cienka): parametry -> serwis -> odpowiedź
   services/        logika i zapytania: katalog, import odsłuchów, statystyki, sesje, trendy,
-                   podobieństwo słuchaczy
+                   podobieństwo słuchaczy, stan danych dla monitoringu
+  metrics.py       metryki Prometheusa i middleware mierzące zapytania
   schemas/         modele Pydantic (kontrakt API)
   seed/            deterministyczny generator danych i loader
   cli.py           python -m app.cli seed
@@ -177,6 +211,7 @@ pipeline/
   musicbrainz.py   klient MusicBrainz, artyści i nagrania do raw, publikacja do katalogu
   listenbrainz.py  klient ListenBrainz, przyrostowy import odsłuchów, publikacja zdarzeń
   flows.py         flow Prefect łączący kroki
+deploy/            konfiguracja Prometheusa (alerty + testy) i Grafany (dashboardy jako JSON)
 migrations/        migracje Alembic
 tests/             testy na prawdziwym PostgreSQL
 docs/adr/          zapisy decyzji architektonicznych
@@ -208,6 +243,8 @@ GitHub Actions przy każdym pushu.
 - [ADR 0010: Sesje słuchania](docs/adr/0010-sesje-sluchania.md)
 - [ADR 0011: Trendy](docs/adr/0011-trendy.md)
 - [ADR 0012: Podobieństwo słuchaczy](docs/adr/0012-podobienstwo-sluchaczy.md)
+- [ADR 0013: Wdrożenie w Dockerze](docs/adr/0013-wdrozenie-docker.md)
+- [ADR 0014: Monitoring i dashboardy](docs/adr/0014-monitoring-i-dashboardy.md)
 
 ## Roadmapa
 
@@ -218,4 +255,6 @@ GitHub Actions przy każdym pushu.
    przyrostowy import odsłuchów z ListenBrainz.
    Statystyki API czytają marts.
 3. **Etap 3: analityka zachowań** (gotowe): sesje słuchania, trendy, podobieństwo słuchaczy.
-4. **Etap 4** (wstępnie): wdrożenie, monitoring i dashboard.
+4. **Etap 4: wdrożenie i monitoring** (w toku): obraz Dockera i pełny stos w compose, obraz
+   publikowany przez CI, metryki i alerty w Prometheusie, dashboardy w Grafanie (gotowe).
+   Dalej: wysyłka alertów (Alertmanager), HTTPS, kopie zapasowe bazy, logi w formacie JSON.

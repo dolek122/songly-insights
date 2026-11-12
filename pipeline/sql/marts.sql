@@ -144,3 +144,15 @@ CREATE INDEX ix_listening_sessions_day ON marts.listening_sessions (day);
 -- When were the marts built? now() is the start of this transaction, i.e. the data in the
 -- marts is complete up to this moment. The API returns it as `data_as_of`.
 CREATE TABLE marts.build_info AS SELECT now() AS built_at;
+
+-- Read access for the Grafana dashboards (ADR 0014). The schema is recreated on every run,
+-- so grants are given here, not once. The role exists only in the Docker deployment
+-- (docker/initdb/02-grafana-reader.sh); elsewhere this block does nothing.
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+        GRANT USAGE ON SCHEMA marts TO grafana_reader;
+        GRANT SELECT ON ALL TABLES IN SCHEMA marts TO grafana_reader;
+    END IF;
+END
+$$;

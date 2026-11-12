@@ -1,5 +1,7 @@
+import argparse
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
@@ -61,3 +63,11 @@ def test_generator_creates_listening_sessions():
 
     # Most plays follow the previous one closely: plays come in sessions.
     assert len(within_session) > len(gaps) / 2
+
+
+def test_cli_end_date():
+    assert cli.parse_end_date("2025-06-30") == datetime(2025, 6, 30, tzinfo=UTC)
+    now = cli.parse_end_date("today")
+    assert abs((datetime.now(UTC) - now).total_seconds()) < 5  # "today" = up to now
+    with pytest.raises(argparse.ArgumentTypeError):
+        cli.parse_end_date("yesterday")

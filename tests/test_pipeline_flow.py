@@ -88,3 +88,26 @@ def test_flow_imports_listenbrainz_listens_into_statistics(client, monkeypatch):
     # The listens went raw -> staging -> listening events -> marts -> API statistics.
     body = client.get("/api/v1/stats/top-tracks", params={"from": "2026-01-01"}).json()
     assert [(t["title"], t["plays"]) for t in body["items"]] == [("So What", 3)]
+
+
+def runs(db) -> list[tuple]:
+    sql = "SELECT status, dq_errors, finished_at IS NOT NULL, error FROM ops.pipeline_runs"
+    return [tuple(r) for r in db.execute(text(sql))]
+
+
+def test_flow_records_a_successful_run(db):
+    flows.songly_pipeline()
+
+    assert runs(db) == [("completed", 0, True, None)]
+
+
+def test_flow_records_a_failed_run(db, factory):
+    track = factory.track(factory.artist())
+    factory.plays(factory.listener(), track, datetime.now(UTC) + timedelta(days=2))
+
+    with pytest.raises(DataQualityError):
+        flows.songly_pipeline()
+
+    [(status, dq_errors, finished, error)] = runs(db)
+    assert (status, dq_errors, finished) == ("failed", 1, True)
+    assert "listening_events_not_in_future" in error

@@ -1,10 +1,28 @@
+# Development:   docker compose up -d db            (only PostgreSQL, as before)
+# Full stack:    docker compose --profile full up -d --build
+# See ADR 0013 and the "Wdrożenie" section of README.md.
+#
+# Passwords come from .env (see .env.example). The defaults are for a local machine only.
+
+x-app: &app
+  image: ${SONGLY_IMAGE:-songly-insights:local}
+  build: .
+  profiles: [full]
+  environment:
+    DATABASE_URL: postgresql+psycopg://songly:${POSTGRES_PASSWORD:-songly}@db:5432/insights
+    MUSICBRAINZ_CONTACT: ${MUSICBRAINZ_CONTACT:-}
+    PREFECT_API_URL: http://prefect:4200/api
+    # Prefect would otherwise send anonymous usage statistics.
+    PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+
 services:
   db:
     image: postgres:16
     environment:
       POSTGRES_USER: songly
-      POSTGRES_PASSWORD: songly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-songly}
       POSTGRES_DB: insights
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana}
     ports:
       - "5432:5432"
     volumes:
@@ -16,6 +34,98 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  # Runs `alembic upgrade head` once and exits. The API starts only after it succeeded,
+  # so the API never runs against an old schema.
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # The slim image has no curl; Python can do the same request.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Prefect server: keeps the history of pipeline runs and serves the UI on :4200.
+  prefect:
+    <<: *app
+    command: ["prefect", "server", "start", "--host", "0.0.0.0"]
+    environment:
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+      # The UI files are prepared at start; the default folder (inside the installed
+      # package) is not writable for the non-root user.
+      PREFECT_UI_STATIC_DIRECTORY: /home/songly/.prefect/ui
+    ports:
+      - "4200:4200"
+    volumes:
+      - prefect:/home/songly/.prefect
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Runs the pipeline on a schedule (default: every day at 03:15 UTC).
+  pipeline:
+    <<: *app
+    command: ["python", "-m", "pipeline", "serve", "--cron", "${PIPELINE_CRON:-15 3 * * *}"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      prefect:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [full]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+      - prometheus:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    profiles: [full]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Read by the data source file (deploy/grafana/provisioning/datasources).
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  prefect:
+  prometheus:
+  grafana:

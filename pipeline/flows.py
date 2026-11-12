@@ -11,7 +11,7 @@ from sqlalchemy import Engine
 
 from app import db
 from app.config import get_settings
-from pipeline import layers, listenbrainz, musicbrainz, quality
+from pipeline import layers, listenbrainz, musicbrainz, quality, runs
 
 
 def get_engine() -> Engine:
@@ -20,13 +20,15 @@ def get_engine() -> Engine:
 
 
 @task
-def check_quality(layer: str, checks: list[quality.Check]) -> None:
+def check_quality(layer: str, checks: list[quality.Check]) -> int:
+    """Run checks; raise on a failed "error" check. Returns the number of failed warnings."""
     logger = get_run_logger()
     results = quality.run_checks(get_engine(), checks)
     for r in results:
         status = "ok" if r.passed else f"FAILED ({r.failing_rows} rows, {r.check.severity})"
         logger.info("DQ %s / %s: %s", layer, r.check.name, status)
     quality.ensure_passed(results)
+    return sum(1 for r in results if not r.passed)
 
 
 # MusicBrainz sometimes answers 503 when it is busy; waiting and trying again usually helps.
@@ -98,23 +100,32 @@ def songly_pipeline(
     `listenbrainz_users` only the API data is processed (no network needed).
     `recordings_per_artist=0` skips downloading recordings.
     """
-    check_quality("sources", quality.SOURCE_CHECKS)
-    if musicbrainz_tags:
-        extract_musicbrainz(musicbrainz_tags, artists_per_tag)
-    build_staging()
-    # The next two steps run after build_staging because they read staging views
-    # (the artist list, the newest known listen). Views read raw live, so whatever
-    # they download is visible in staging right away.
-    if musicbrainz_tags and recordings_per_artist > 0:
-        extract_musicbrainz_recordings(recordings_per_artist)
-    if listenbrainz_users:
-        extract_listenbrainz(listenbrainz_users, listens_per_user)
-    check_quality("staging", quality.STAGING_CHECKS)
-    if musicbrainz_tags:
-        # Staging views read the catalog live, so new artists reach the marts in this run.
-        publish_musicbrainz(musicbrainz_tags)
-    if listenbrainz_users:
-        # After MusicBrainz: tracks it created (with lengths and genres) are reused.
-        publish_listenbrainz()
-    build_marts()
-    check_quality("marts", quality.MART_CHECKS)
+    # Every run is recorded in ops.pipeline_runs, also a failed one (for monitoring).
+    run_id = runs.start_run(get_engine(), str(flow_run.id or "local"))
+    warnings = 0
+    try:
+        warnings += check_quality("sources", quality.SOURCE_CHECKS)
+        if musicbrainz_tags:
+            extract_musicbrainz(musicbrainz_tags, artists_per_tag)
+        build_staging()
+        # The next two steps run after build_staging because they read staging views
+        # (the artist list, the newest known listen). Views read raw live, so whatever
+        # they download is visible in staging right away.
+        if musicbrainz_tags and recordings_per_artist > 0:
+            extract_musicbrainz_recordings(recordings_per_artist)
+        if listenbrainz_users:
+            extract_listenbrainz(listenbrainz_users, listens_per_user)
+        warnings += check_quality("staging", quality.STAGING_CHECKS)
+        if musicbrainz_tags:
+            # Staging views read the catalog live, so new artists reach the marts in this run.
+            publish_musicbrainz(musicbrainz_tags)
+        if listenbrainz_users:
+            # After MusicBrainz: tracks it created (with lengths and genres) are reused.
+            publish_listenbrainz()
+        build_marts()
+        warnings += check_quality("marts", quality.MART_CHECKS)
+    except Exception as exc:
+        errors = len(exc.failed) if isinstance(exc, quality.DataQualityError) else 0
+        runs.finish_run(get_engine(), run_id, "failed", warnings, errors, str(exc))
+        raise
+    runs.finish_run(get_engine(), run_id, "completed", warnings, 0)

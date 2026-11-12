@@ -46,7 +46,7 @@ class TrackCreate(BaseModel):
 class TrackOut(OrmModel):
     id: int
     title: str
-    duration_ms: int
+    duration_ms: int | None  # None: length unknown (imported tracks)
     mbid: UUID | None
     artist: ArtistRef
     created_at: datetime
@@ -61,4 +61,5 @@ class ListenerOut(OrmModel):
     id: int
     username: str
     country: str | None
+    listenbrainz_user: str | None
     created_at: datetime

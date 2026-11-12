@@ -15,15 +15,12 @@ from dataclasses import dataclass
 import httpx
 from sqlalchemy import Engine, text
 
+from pipeline.http import RateLimiter, make_user_agent, send_json
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://musicbrainz.org/ws/2"
 MAX_PAGE_SIZE = 100  # the API's own limit for `limit`
-
-
-def make_user_agent(contact: str | None) -> str:
-    agent = "songly-insights/0.1"
-    return f"{agent} ( {contact} )" if contact else agent
 
 
 def normalize_tag(tag: str) -> str:
@@ -31,10 +28,7 @@ def normalize_tag(tag: str) -> str:
 
 
 class MusicBrainzClient:
-    """Thin wrapper over httpx that respects the rate limit.
-
-    `sleep` and `clock` can be replaced in tests, so tests do not really wait.
-    """
+    """Thin wrapper over httpx that respects the rate limit (pipeline/http.py)."""
 
     def __init__(
         self,
@@ -44,10 +38,7 @@ class MusicBrainzClient:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.http = http
-        self.min_interval_s = min_interval_s
-        self._sleep = sleep
-        self._clock = clock
-        self._last_request_at: float | None = None
+        self.limiter = RateLimiter(min_interval_s, sleep, clock)
 
     @classmethod
     def create(cls, contact: str | None = None) -> "MusicBrainzClient":
@@ -69,20 +60,7 @@ class MusicBrainzClient:
         return self.http.build_request("GET", "/recording", params=params)
 
     def send(self, request: httpx.Request) -> dict:
-        self._wait_for_rate_limit()
-        response = self.http.send(request)
-        # 503 means "too many requests" on MusicBrainz. We raise; the Prefect task retries.
-        response.raise_for_status()
-        return response.json()
-
-    def _wait_for_rate_limit(self) -> None:
-        now = self._clock()
-        if self._last_request_at is not None:
-            wait = self.min_interval_s - (now - self._last_request_at)
-            if wait > 0:
-                self._sleep(wait)
-                now += wait
-        self._last_request_at = now
+        return send_json(self.http, self.limiter, request)
 
 
 @dataclass
@@ -218,8 +196,8 @@ def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
     * artists are matched by mbid: new ones are inserted, known ones get the current name,
     * an artist is linked to every existing genre that matches one of its tags with
       a positive vote count,
-    * recordings become tracks (matched by mbid); recordings without a length or that
-      are videos are skipped, because a track needs a positive duration.
+    * recordings become tracks (matched by mbid); videos are skipped, recordings without
+      a length get an unknown (NULL) duration (ADR 0009).
     Running it twice changes nothing (ON CONFLICT), so it is safe to retry.
     Requires the staging layer to be built first.
     """
@@ -260,13 +238,16 @@ def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
             text(
                 """
                 INSERT INTO public.tracks (title, artist_id, duration_ms, mbid)
-                SELECT left(r.title, 300), a.id, r.length_ms, r.recording_mbid
+                -- NULLIF: a length of 0 means "unknown" too (the column must be > 0).
+                SELECT left(r.title, 300), a.id, nullif(r.length_ms, 0), r.recording_mbid
                 FROM staging.musicbrainz_recordings AS r
                 JOIN public.artists AS a ON a.mbid = r.artist_mbid
-                WHERE r.length_ms > 0 AND NOT r.is_video
-                -- A known track gets the current title and length, but keeps its artist.
-                ON CONFLICT (mbid) DO UPDATE
-                    SET title = EXCLUDED.title, duration_ms = EXCLUDED.duration_ms
+                WHERE NOT r.is_video
+                -- A known track gets the current title and length (an unknown length does
+                -- not erase a known one), but keeps its artist.
+                ON CONFLICT (mbid) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    duration_ms = coalesce(EXCLUDED.duration_ms, tracks.duration_ms)
                 """
             )
         ).rowcount

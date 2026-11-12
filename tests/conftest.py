@@ -58,7 +58,12 @@ def clean_database(engine: Engine) -> Iterator[None]:
     """Runs after EVERY test (autouse), also tests that use `engine` without `db`."""
     yield
     with engine.begin() as conn:
-        tables = [*TABLES, "raw.musicbrainz_artist_search", "raw.musicbrainz_recording_browse"]
+        tables = [
+            *TABLES,
+            "raw.musicbrainz_artist_search",
+            "raw.musicbrainz_recording_browse",
+            "raw.listenbrainz_listens",
+        ]
         conn.execute(text(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE"))
         # staging and marts are fully derived; the pipeline creates them again when needed.
         conn.execute(text("DROP SCHEMA IF EXISTS marts, staging CASCADE"))
@@ -96,7 +101,9 @@ class Factory:
     def artist(self, name: str = "Artist", genres: list[Genre] | None = None) -> Artist:
         return self._save(Artist(name=name, genres=genres or []))
 
-    def track(self, artist: Artist, title: str = "Track", duration_ms: int = 200_000) -> Track:
+    def track(
+        self, artist: Artist, title: str = "Track", duration_ms: int | None = 200_000
+    ) -> Track:
         return self._save(Track(title=title, artist_id=artist.id, duration_ms=duration_ms))
 
     def listener(self, username: str = "alice") -> Listener:

@@ -11,7 +11,7 @@ from sqlalchemy import Engine
 
 from app import db
 from app.config import get_settings
-from pipeline import layers, musicbrainz, quality
+from pipeline import layers, listenbrainz, musicbrainz, quality
 
 
 def get_engine() -> Engine:
@@ -50,6 +50,23 @@ def extract_musicbrainz_recordings(recordings_per_artist: int) -> musicbrainz.Ex
     return result
 
 
+@task(retries=3, retry_delay_seconds=30)
+def extract_listenbrainz(users: list[str], listens_per_user: int) -> listenbrainz.ListensResult:
+    client = listenbrainz.ListenBrainzClient.create(get_settings().musicbrainz_contact)
+    result = listenbrainz.extract_listens(
+        get_engine(), client, users, listens_per_user, run_id=str(flow_run.id or "local")
+    )
+    get_run_logger().info("ListenBrainz: %s", result)
+    return result
+
+
+@task
+def publish_listenbrainz() -> listenbrainz.PublishListensResult:
+    result = listenbrainz.publish_listens(get_engine())
+    get_run_logger().info("ListenBrainz published: %s", result)
+    return result
+
+
 @task
 def build_staging() -> None:
     layers.build_staging(get_engine())
@@ -72,23 +89,32 @@ def songly_pipeline(
     musicbrainz_tags: list[str] | None = None,
     artists_per_tag: int = 25,
     recordings_per_artist: int = 25,
+    listenbrainz_users: list[str] | None = None,
+    listens_per_user: int = 1000,
 ) -> None:
-    """sources -> (MusicBrainz -> raw) -> staging -> (catalog) -> marts, with checks between.
+    """sources -> (MusicBrainz, ListenBrainz -> raw) -> staging -> (catalog) -> marts.
 
-    Without `musicbrainz_tags` only the API data is processed (no network needed).
+    Data quality checks run between the steps. Without `musicbrainz_tags` and
+    `listenbrainz_users` only the API data is processed (no network needed).
     `recordings_per_artist=0` skips downloading recordings.
     """
     check_quality("sources", quality.SOURCE_CHECKS)
     if musicbrainz_tags:
         extract_musicbrainz(musicbrainz_tags, artists_per_tag)
     build_staging()
+    # The next two steps run after build_staging because they read staging views
+    # (the artist list, the newest known listen). Views read raw live, so whatever
+    # they download is visible in staging right away.
     if musicbrainz_tags and recordings_per_artist > 0:
-        # Runs after build_staging because it reads the artist list from a staging view.
-        # Views read raw live, so the recordings are visible in staging right away.
         extract_musicbrainz_recordings(recordings_per_artist)
+    if listenbrainz_users:
+        extract_listenbrainz(listenbrainz_users, listens_per_user)
     check_quality("staging", quality.STAGING_CHECKS)
     if musicbrainz_tags:
         # Staging views read the catalog live, so new artists reach the marts in this run.
         publish_musicbrainz(musicbrainz_tags)
+    if listenbrainz_users:
+        # After MusicBrainz: tracks it created (with lengths and genres) are reused.
+        publish_listenbrainz()
     build_marts()
     check_quality("marts", quality.MART_CHECKS)

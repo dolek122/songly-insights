@@ -1,7 +1,8 @@
 # Songly Insights
 
 API do analizy odsłuchów muzyki: kto czego słucha, kiedy i jakich gatunków, oraz pipeline
-danych, który buduje z tych odsłuchów tabele analityczne i wzbogaca katalog danymi z MusicBrainz.
+danych, który buduje z tych odsłuchów tabele analityczne, wzbogaca katalog danymi z MusicBrainz
+i importuje prawdziwe odsłuchy z ListenBrainz.
 Zbudowane w **FastAPI**, **SQLAlchemy 2.0**, **Alembic**, **PostgreSQL 16** i **Prefect 3**.
 
 Projekt portfolio rozwijany etapami (zobacz [Roadmapę](#roadmapa)).
@@ -92,10 +93,10 @@ Kody: `validation_error` (422), `invalid_time_window` (422), `unknown_reference`
 ## Pipeline danych (etap 2)
 
 ```
-API (public) ─────────────┐
-                          ├─► staging (widoki) ─► marts (tabele) ─► statystyki API
-MusicBrainz ─► raw (JSON) ┘          │
-                                     └─► katalog API (artyści, gatunki, utwory)
+API (public) ──────────────┐
+MusicBrainz ──► raw (JSON) ├─► staging (widoki) ─► marts (tabele) ─► statystyki API
+ListenBrainz ─► raw (JSON) ┘          │
+                                      └─► katalog API (artyści, gatunki, utwory, odsłuchy)
 
 Testy jakości danych: przed staging, po staging i po marts.
 ```
@@ -104,17 +105,19 @@ Testy jakości danych: przed staging, po staging i po marts.
 python -m pipeline run                                            # tylko dane z API
 python -m pipeline run --musicbrainz-tag jazz --musicbrainz-tag rock --artists-per-tag 50
 python -m pipeline run --musicbrainz-tag jazz --recordings-per-artist 0   # bez nagrań
+python -m pipeline run --listenbrainz-user moja_nazwa --listens-per-user 500   # odsłuchy
 python -m pipeline serve --cron "15 3 * * *"                     # codziennie o 3:15 UTC
 ```
 
-Przed importem z MusicBrainz ustaw `MUSICBRAINZ_CONTACT` w `.env` (e-mail lub adres projektu):
-MusicBrainz prosi o kontakt w nagłówku User-Agent. Historia uruchomień i logi w UI Prefecta:
+Przed importem ustaw `MUSICBRAINZ_CONTACT` w `.env` (e-mail lub adres projektu): MusicBrainz
+i ListenBrainz proszą o kontakt w nagłówku User-Agent. Odsłuchy z ListenBrainz są publiczne,
+ale to dane osobowe: importuj swoje konto albo konta osób, które się zgodziły. Historia uruchomień i logi w UI Prefecta:
 `prefect server start`.
 
 | Warstwa | Co zawiera |
 |---|---|
-| `raw` | Odpowiedzi MusicBrainz w całości (`jsonb`): wyszukiwanie artystów i ich nagrania; tylko dopisywane, działa też jako cache |
-| `staging` | Widoki: oczyszczone dane z API i rozpakowany JSON z MusicBrainz (najnowsza wersja artysty i nagrania) |
+| `raw` | Odpowiedzi MusicBrainz (artyści, nagrania) i ListenBrainz (odsłuchy) w całości (`jsonb`), tylko dopisywane |
+| `staging` | Widoki: oczyszczone dane z API i rozpakowany JSON (najnowsza wersja artysty i nagrania, odsłuchy bez duplikatów) |
 | `marts.listener_track_daily` | Dzień (UTC) × słuchacz × utwór: odsłuchy, czas, pierwszy/ostatni odsłuch. Źródło statystyk API |
 | `marts.daily_listener_activity` | Dzień (UTC) × słuchacz: odsłuchy, unikalne utwory i artyści, czas słuchania |
 | `marts.daily_genre_plays` | Dzień (UTC) × gatunek: odsłuchy i unikalni słuchacze |
@@ -144,7 +147,9 @@ pipeline/
   sql/             definicje warstw staging i marts (czysty SQL)
   layers.py        budowanie warstw w jednej transakcji
   quality.py       testy jakości danych
+  http.py          wspólny limit zapytań i User-Agent
   musicbrainz.py   klient MusicBrainz, artyści i nagrania do raw, publikacja do katalogu
+  listenbrainz.py  klient ListenBrainz, przyrostowy import odsłuchów, publikacja zdarzeń
   flows.py         flow Prefect łączący kroki
 migrations/        migracje Alembic
 tests/             testy na prawdziwym PostgreSQL
@@ -173,15 +178,16 @@ GitHub Actions przy każdym pushu.
 - [ADR 0006: Import artystów z MusicBrainz](docs/adr/0006-import-musicbrainz.md)
 - [ADR 0007: Statystyki API czytane z martów](docs/adr/0007-statystyki-api-z-martow.md)
 - [ADR 0008: Nagrania z MusicBrainz jako utwory](docs/adr/0008-nagrania-z-musicbrainz.md)
+- [ADR 0009: Odsłuchy z ListenBrainz](docs/adr/0009-odsluchy-z-listenbrainz.md)
 
 ## Roadmapa
 
 1. **Etap 1: API analityczne** (gotowe): katalog, idempotentny import odsłuchów, statystyki
    w oknach czasowych, dane syntetyczne, testy na PostgreSQL, CI.
 2. **Etap 2: pipeline danych** (podstawa gotowa): warstwy raw → staging → marts w PostgreSQL,
-   orkiestracja w Prefect, testy jakości danych, import artystów, tagów i nagrań z MusicBrainz.
+   orkiestracja w Prefect, testy jakości danych, import artystów, tagów i nagrań z MusicBrainz,
+   przyrostowy import odsłuchów z ListenBrainz.
    Statystyki API czytają marts.
-   Dalej: opcjonalnie odsłuchy z ListenBrainz.
 3. **Etap 3** (wstępnie): rozszerzona analityka na martach, np. trendy, sesje słuchania,
    podobieństwo słuchaczy, opcjonalnie dane z ListenBrainz.
 4. **Etap 4** (wstępnie): wdrożenie, monitoring i dashboard.

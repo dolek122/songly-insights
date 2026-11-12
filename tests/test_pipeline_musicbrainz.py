@@ -3,6 +3,7 @@ import pytest
 from sqlalchemy import text
 
 from pipeline import layers, musicbrainz, quality
+from pipeline.http import make_user_agent
 from tests.pipeline_helpers import (
     MBID_A,
     MBID_B,
@@ -27,8 +28,8 @@ def raw_pages(db) -> list[tuple]:
 
 
 def test_user_agent_names_the_app_and_contact():
-    assert musicbrainz.make_user_agent(None) == "songly-insights/0.1"
-    assert musicbrainz.make_user_agent("me@example.com") == "songly-insights/0.1 ( me@example.com )"
+    assert make_user_agent(None) == "songly-insights/0.1"
+    assert make_user_agent("me@example.com") == "songly-insights/0.1 ( me@example.com )"
 
 
 def test_search_request_quotes_the_tag():
@@ -245,9 +246,15 @@ def test_publish_turns_recordings_into_tracks(engine, db):
         ],
     )
 
-    # Recordings without a length or that are videos are skipped.
+    # Videos are skipped; a recording without a length gets an unknown (NULL) duration.
+    assert tracks(db) == [("No Length", None, REC_2, "Miles"), ("So What", 545_000, REC_1, "Miles")]
+    assert result.tracks_upserted == 2
+
+
+def test_unknown_length_does_not_erase_a_known_one(engine, db):
+    publish_with_recordings(engine, [mb_recording(REC_1, "So What", length=545_000)])
+    publish_with_recordings(engine, [mb_recording(REC_1, "So What", length=None)])
     assert tracks(db) == [("So What", 545_000, REC_1, "Miles")]
-    assert result.tracks_upserted == 1
 
 
 def test_publish_tracks_is_idempotent_and_updates_title(engine, db):

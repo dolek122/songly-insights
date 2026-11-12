@@ -103,3 +103,56 @@ SELECT
     loaded_at
 FROM ranked
 WHERE version = 1;
+
+-- ListenBrainz (schema raw) ----------------------------------------------------------------
+
+-- One row per listen. Pages can overlap (incremental load, retries), so the same listen may
+-- be in raw several times; DISTINCT ON keeps one per (user, time, recording_msid).
+-- recording_msid is ListenBrainz's own id of the submitted track and is always present.
+-- The mbids come from ListenBrainz's mapping to MusicBrainz (mbid_mapping) or, if missing,
+-- from what the listening app sent (additional_info). App data can be anything, so an
+-- mbid is cast to uuid only when it looks like one; otherwise it becomes NULL.
+CREATE VIEW staging.listenbrainz_listens AS
+WITH listens AS (
+    SELECT r.id AS raw_id, r.user_name, l.listen, l.listen -> 'track_metadata' AS meta
+    FROM raw.listenbrainz_listens AS r
+    CROSS JOIN LATERAL jsonb_array_elements(r.payload -> 'payload' -> 'listens') AS l(listen)
+),
+parsed AS (
+    SELECT
+        raw_id,
+        user_name,
+        to_timestamp((listen ->> 'listened_at')::bigint) AS listened_at,
+        listen ->> 'recording_msid' AS recording_msid,
+        coalesce(
+            meta -> 'mbid_mapping' ->> 'recording_mbid',
+            meta -> 'additional_info' ->> 'recording_mbid'
+        ) AS recording_mbid_text,
+        coalesce(
+            meta -> 'mbid_mapping' -> 'artists' -> 0 ->> 'artist_mbid',
+            meta -> 'additional_info' -> 'artist_mbids' ->> 0
+        ) AS artist_mbid_text,
+        trim(coalesce(meta -> 'mbid_mapping' ->> 'recording_name', meta ->> 'track_name'))
+            AS track_name,
+        trim(coalesce(
+            meta -> 'mbid_mapping' -> 'artists' -> 0 ->> 'artist_credit_name',
+            meta ->> 'artist_name'
+        )) AS artist_name,
+        meta -> 'additional_info' ->> 'duration_ms' AS duration_text
+    FROM listens
+)
+SELECT DISTINCT ON (user_name, listened_at, recording_msid)
+    user_name,
+    listened_at,
+    recording_msid,
+    CASE WHEN recording_mbid_text ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
+        THEN recording_mbid_text::uuid END AS recording_mbid,
+    CASE WHEN artist_mbid_text ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
+        THEN artist_mbid_text::uuid END AS artist_mbid,
+    track_name,
+    artist_name,
+    -- Only a positive whole number is a usable length; anything else means "unknown".
+    CASE WHEN duration_text ~ '^[0-9]{1,9}$' AND duration_text::int > 0
+        THEN duration_text::int END AS duration_ms
+FROM parsed
+ORDER BY user_name, listened_at, recording_msid, raw_id DESC;

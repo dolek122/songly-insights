@@ -1,6 +1,7 @@
 # ADR 0008: Nagrania z MusicBrainz jako utwory w katalogu
 
-Status: zaakceptowana · Data: 2026-11-12 · Uzupełnia: ADR 0006
+Status: zaakceptowana · Data: 2026-11-12 · Uzupełnia: ADR 0006 · Częściowo zmieniona przez
+ADR 0009 (nagrania bez długości trafiają do katalogu z nieznaną długością)
 
 ## Kontekst
 

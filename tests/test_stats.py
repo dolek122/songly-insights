@@ -254,3 +254,17 @@ def test_statistics_are_as_fresh_as_the_last_pipeline_run(client, factory, libra
     # ... and then they are, with a newer data_as_of.
     assert ("Silent", 3) in [(a["name"], a["plays"]) for a in after["items"]]
     assert after["data_as_of"] > before["data_as_of"]
+
+
+def test_unknown_track_length_counts_as_play_but_not_as_time(client, factory, build_marts):
+    alice = factory.listener()
+    known = factory.track(factory.artist("A"), "Known", duration_ms=100_000)
+    unknown = factory.track(factory.artist("B"), "Unknown", duration_ms=None)
+    factory.plays(alice, known, at(1))
+    factory.plays(alice, unknown, at(1), at(2))
+    build_marts()
+
+    body = client.get(f"{API}/listeners/{alice.id}/summary").json()
+
+    assert body["total_plays"] == 3
+    assert body["total_listening_ms"] == 100_000  # only plays with a known length

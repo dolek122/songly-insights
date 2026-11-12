@@ -12,7 +12,8 @@ and explain non-obvious choices.
 - Migrate: `alembic upgrade head`
 - Seed: `python -m app.cli seed --reset`
 - Run: `uvicorn app.main:app --reload` (statistics need `python -m pipeline run` first)
-- Pipeline: `python -m pipeline run` (add `--musicbrainz-tag jazz` to import MusicBrainz; needs internet)
+- Pipeline: `python -m pipeline run` (add `--musicbrainz-tag jazz` / `--listenbrainz-user name`
+  to import MusicBrainz / ListenBrainz; needs internet)
 - Tests: `pytest` (needs PostgreSQL; the schema is built from the real migrations)
 - Quality gate before every commit: `ruff check . && ruff format --check . && pytest`
 
@@ -35,7 +36,7 @@ and explain non-obvious choices.
 - Do not build features on the Spotify Web API: new apps lost most endpoints in 2024-2026.
   Data comes from the synthetic generator, MusicBrainz and optionally ListenBrainz (ADR 0004).
 
-## Pipeline (Stage 2, see ADRs 0005, 0006 and 0008)
+## Pipeline (Stage 2, see ADRs 0005, 0006, 0008 and 0009)
 
 - Schemas: `raw` (external data as received, append-only, created by migration 0002),
   `staging` (views, clean + rename only), `marts` (analytics tables). staging and marts are
@@ -47,7 +48,12 @@ and explain non-obvious choices.
   `_fetch_page` (cache + append). Recordings become `public.tracks` matched by mbid.
 - Tests never call MusicBrainz: use `tests/pipeline_helpers.py` (httpx MockTransport).
   Database cleanup runs after every test (`clean_database`, autouse); add new raw tables there.
-- The pipeline writes to `public` only in `publish_to_catalog`.
+- ListenBrainz: listens are loaded incrementally (watermark = newest listen in staging, paging
+  back with `max_ts`), matched to tracks by recording mbid; missing tracks/artists are created
+  from listen metadata, never overwriting MusicBrainz data. `tracks.duration_ms` may be NULL.
+- Both API clients share `pipeline/http.py` (RateLimiter, User-Agent).
+- The pipeline writes to `public` only in `musicbrainz.publish_to_catalog` and
+  `listenbrainz.publish_listens`; both are idempotent (ON CONFLICT).
 
 ## Statistics read marts (ADR 0007)
 

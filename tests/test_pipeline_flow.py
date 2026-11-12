@@ -6,12 +6,14 @@ import pytest
 from prefect.testing.utilities import prefect_test_harness
 from sqlalchemy import text
 
-from pipeline import flows, musicbrainz
+from pipeline import flows, listenbrainz, musicbrainz
 from pipeline.quality import DataQualityError
 from tests.pipeline_helpers import (
     MBID_A,
     REC_1,
+    FakeListenBrainz,
     FakeMusicBrainz,
+    lb_listen,
     mb_artist,
     mb_recording,
     recordings_page,
@@ -71,3 +73,18 @@ def test_flow_stops_on_failed_quality_check(db, factory):
 
     # The source check failed first, so the marts were never built.
     assert db.execute(text("SELECT to_regclass('marts.artist_popularity')")).scalar() is None
+
+
+def test_flow_imports_listenbrainz_listens_into_statistics(client, monkeypatch):
+    fake = FakeListenBrainz(
+        {"ana": [lb_listen(1_767_225_600 + i, REC_1, MBID_A, "So What", "Miles") for i in range(3)]}
+    )
+    monkeypatch.setattr(
+        listenbrainz.ListenBrainzClient, "create", lambda contact=None: fake.client()
+    )
+
+    flows.songly_pipeline(listenbrainz_users=["ana"])
+
+    # The listens went raw -> staging -> listening events -> marts -> API statistics.
+    body = client.get("/api/v1/stats/top-tracks", params={"from": "2026-01-01"}).json()
+    assert [(t["title"], t["plays"]) for t in body["items"]] == [("So What", 3)]

@@ -76,9 +76,21 @@ STAGING_CHECKS = [
         "SELECT recording_mbid FROM staging.musicbrainz_recordings WHERE coalesce(title, '') = ''",
     ),
     Check(
-        # Not an error: such recordings are simply not published as tracks.
+        # Not an error: such recordings become tracks with an unknown length (ADR 0009).
         "musicbrainz_recordings_have_length",
         "SELECT recording_mbid FROM staging.musicbrainz_recordings WHERE length_ms IS NULL",
+        severity="warn",
+    ),
+    Check(
+        # Such listens cannot be matched to a track and are not imported.
+        "listenbrainz_listens_have_recording_mbid",
+        "SELECT user_name FROM staging.listenbrainz_listens WHERE recording_mbid IS NULL",
+        severity="warn",
+    ),
+    Check(
+        # Broken clocks in listening apps; these listens are skipped on import.
+        "listenbrainz_listens_not_in_future",
+        "SELECT user_name FROM staging.listenbrainz_listens WHERE listened_at > now()",
         severity="warn",
     ),
     Check(
@@ -117,6 +129,21 @@ MART_CHECKS = [
     Check(
         "listener_track_daily_first_before_last",
         "SELECT day FROM marts.listener_track_daily WHERE first_listened_at > last_listened_at",
+    ),
+    Check(
+        # Runs at the end, after publishing: listens with a recording mbid that did not become
+        # events, e.g. the recording is new and the listen has no artist mbid to create it.
+        "listenbrainz_listens_not_imported",
+        """
+        SELECT l.user_name
+        FROM staging.listenbrainz_listens AS l
+        LEFT JOIN public.listeners AS li ON li.listenbrainz_user = l.user_name
+        LEFT JOIN public.tracks AS t ON t.mbid = l.recording_mbid
+        LEFT JOIN public.listening_events AS e
+            ON e.listener_id = li.id AND e.track_id = t.id AND e.listened_at = l.listened_at
+        WHERE l.recording_mbid IS NOT NULL AND l.listened_at <= now() AND e.id IS NULL
+        """,
+        severity="warn",
     ),
     Check(
         "artist_popularity_listeners_not_above_plays",

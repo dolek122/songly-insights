@@ -60,7 +60,9 @@ class Track(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(300))
     artist_id: Mapped[int] = mapped_column(ForeignKey("artists.id"), index=True)
-    duration_ms: Mapped[int] = mapped_column(Integer)
+    # NULL = unknown length. The API always requires it, but tracks created from
+    # ListenBrainz listens often come without one (ADR 0009). NULL passes the CHECK.
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
     mbid: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -74,6 +76,8 @@ class Listener(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True)
     # ISO 3166-1 alpha-2 code, e.g. "PL". Optional.
     country: Mapped[str | None] = mapped_column(String(2))
+    # Set for listeners imported from ListenBrainz: links them to their account there.
+    listenbrainz_user: Mapped[str | None] = mapped_column(String(100), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

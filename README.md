@@ -95,7 +95,7 @@ Kody: `validation_error` (422), `invalid_time_window` (422), `unknown_reference`
 API (public) ─────────────┐
                           ├─► staging (widoki) ─► marts (tabele) ─► statystyki API
 MusicBrainz ─► raw (JSON) ┘          │
-                                     └─► katalog API (nowi artyści i gatunki)
+                                     └─► katalog API (artyści, gatunki, utwory)
 
 Testy jakości danych: przed staging, po staging i po marts.
 ```
@@ -103,6 +103,7 @@ Testy jakości danych: przed staging, po staging i po marts.
 ```bash
 python -m pipeline run                                            # tylko dane z API
 python -m pipeline run --musicbrainz-tag jazz --musicbrainz-tag rock --artists-per-tag 50
+python -m pipeline run --musicbrainz-tag jazz --recordings-per-artist 0   # bez nagrań
 python -m pipeline serve --cron "15 3 * * *"                     # codziennie o 3:15 UTC
 ```
 
@@ -112,8 +113,8 @@ MusicBrainz prosi o kontakt w nagłówku User-Agent. Historia uruchomień i logi
 
 | Warstwa | Co zawiera |
 |---|---|
-| `raw` | Odpowiedzi MusicBrainz w całości (`jsonb`), tylko dopisywane; działa też jako cache |
-| `staging` | Widoki: oczyszczone dane z API i rozpakowany JSON z MusicBrainz (najnowsza wersja artysty) |
+| `raw` | Odpowiedzi MusicBrainz w całości (`jsonb`): wyszukiwanie artystów i ich nagrania; tylko dopisywane, działa też jako cache |
+| `staging` | Widoki: oczyszczone dane z API i rozpakowany JSON z MusicBrainz (najnowsza wersja artysty i nagrania) |
 | `marts.listener_track_daily` | Dzień (UTC) × słuchacz × utwór: odsłuchy, czas, pierwszy/ostatni odsłuch. Źródło statystyk API |
 | `marts.daily_listener_activity` | Dzień (UTC) × słuchacz: odsłuchy, unikalne utwory i artyści, czas słuchania |
 | `marts.daily_genre_plays` | Dzień (UTC) × gatunek: odsłuchy i unikalni słuchacze |
@@ -143,7 +144,7 @@ pipeline/
   sql/             definicje warstw staging i marts (czysty SQL)
   layers.py        budowanie warstw w jednej transakcji
   quality.py       testy jakości danych
-  musicbrainz.py   klient MusicBrainz, ładowanie do raw, publikacja do katalogu
+  musicbrainz.py   klient MusicBrainz, artyści i nagrania do raw, publikacja do katalogu
   flows.py         flow Prefect łączący kroki
 migrations/        migracje Alembic
 tests/             testy na prawdziwym PostgreSQL
@@ -171,15 +172,16 @@ GitHub Actions przy każdym pushu.
 - [ADR 0005: Warstwy raw → staging → marts i Prefect](docs/adr/0005-warstwy-danych-i-prefect.md)
 - [ADR 0006: Import artystów z MusicBrainz](docs/adr/0006-import-musicbrainz.md)
 - [ADR 0007: Statystyki API czytane z martów](docs/adr/0007-statystyki-api-z-martow.md)
+- [ADR 0008: Nagrania z MusicBrainz jako utwory](docs/adr/0008-nagrania-z-musicbrainz.md)
 
 ## Roadmapa
 
 1. **Etap 1: API analityczne** (gotowe): katalog, idempotentny import odsłuchów, statystyki
    w oknach czasowych, dane syntetyczne, testy na PostgreSQL, CI.
 2. **Etap 2: pipeline danych** (podstawa gotowa): warstwy raw → staging → marts w PostgreSQL,
-   orkiestracja w Prefect, testy jakości danych, import artystów i tagów z MusicBrainz.
+   orkiestracja w Prefect, testy jakości danych, import artystów, tagów i nagrań z MusicBrainz.
    Statystyki API czytają marts.
-   Dalej: nagrania z MusicBrainz, opcjonalnie odsłuchy z ListenBrainz.
+   Dalej: opcjonalnie odsłuchy z ListenBrainz.
 3. **Etap 3** (wstępnie): rozszerzona analityka na martach, np. trendy, sesje słuchania,
    podobieństwo słuchaczy, opcjonalnie dane z ListenBrainz.
 4. **Etap 4** (wstępnie): wdrożenie, monitoring i dashboard.

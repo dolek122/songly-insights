@@ -63,6 +63,11 @@ class MusicBrainzClient:
         params = {"query": f'tag:"{tag}"', "limit": limit, "offset": offset, "fmt": "json"}
         return self.http.build_request("GET", "/artist", params=params)
 
+    def recording_browse_request(self, artist_mbid: str, limit: int, offset: int) -> httpx.Request:
+        # "Browse" lists entities linked to another one (here: recordings of an artist).
+        params = {"artist": artist_mbid, "limit": limit, "offset": offset, "fmt": "json"}
+        return self.http.build_request("GET", "/recording", params=params)
+
     def send(self, request: httpx.Request) -> dict:
         self._wait_for_rate_limit()
         response = self.http.send(request)
@@ -86,21 +91,50 @@ class ExtractResult:
     pages_from_cache: int = 0
 
 
-_CACHED_PAGE = text(
-    """
-    SELECT payload FROM raw.musicbrainz_artist_search
-    WHERE request_url = :url AND loaded_at > now() - make_interval(days => :max_age_days)
-    ORDER BY loaded_at DESC
-    LIMIT 1
-    """
-)
+def _fetch_page(
+    engine: Engine,
+    client: MusicBrainzClient,
+    request: httpx.Request,
+    table: str,
+    columns: dict,
+    max_age_days: int,
+    result: ExtractResult,
+) -> dict:
+    """Return one page of results, from the raw table if it is fresh, else from the API.
 
-_INSERT_PAGE = text(
+    raw is append-only: we never update or delete there. A page downloaded less than
+    `max_age_days` ago is not downloaded again (raw doubles as a cache), which keeps
+    reruns fast and polite to MusicBrainz.
+
+    `table` and the keys of `columns` come from this module, never from user input,
+    so putting them into the SQL text is safe; all values are bound parameters.
     """
-    INSERT INTO raw.musicbrainz_artist_search (run_id, tag, page_offset, request_url, payload)
-    VALUES (:run_id, :tag, :page_offset, :url, CAST(:payload AS jsonb))
-    """
-)
+    url = str(request.url)
+    cached = text(
+        f"""
+        SELECT payload FROM {table}
+        WHERE request_url = :url AND loaded_at > now() - make_interval(days => :max_age_days)
+        ORDER BY loaded_at DESC
+        LIMIT 1
+        """
+    )
+    with engine.connect() as conn:
+        payload = conn.execute(cached, {"url": url, "max_age_days": max_age_days}).scalar()
+    if payload is not None:
+        result.pages_from_cache += 1
+        return payload
+
+    payload = client.send(request)
+    names = ", ".join(columns)
+    values = ", ".join(f":{name}" for name in columns)
+    insert = text(
+        f"INSERT INTO {table} ({names}, request_url, payload) "
+        f"VALUES ({values}, :url, CAST(:payload AS jsonb))"
+    )
+    with engine.begin() as conn:
+        conn.execute(insert, {**columns, "url": url, "payload": json.dumps(payload)})
+    result.pages_downloaded += 1
+    return payload
 
 
 def extract_artists_by_tag(
@@ -111,38 +145,20 @@ def extract_artists_by_tag(
     run_id: str,
     max_age_days: int = 30,
 ) -> ExtractResult:
-    """Download artist search pages for each tag into raw.musicbrainz_artist_search.
-
-    raw is append-only: we never update or delete there. A page downloaded less than
-    `max_age_days` ago is not downloaded again (raw doubles as a cache), which keeps
-    reruns fast and polite to MusicBrainz.
-    """
+    """Download artist search pages for each tag into raw.musicbrainz_artist_search."""
     result = ExtractResult()
     page_size = min(MAX_PAGE_SIZE, artists_per_tag)
     for tag in sorted({normalize_tag(t) for t in tags}):
         for offset in range(0, artists_per_tag, page_size):
-            request = client.artist_search_request(tag, page_size, offset)
-            url = str(request.url)
-            with engine.connect() as conn:
-                payload = conn.execute(
-                    _CACHED_PAGE, {"url": url, "max_age_days": max_age_days}
-                ).scalar()
-            if payload is not None:
-                result.pages_from_cache += 1
-            else:
-                payload = client.send(request)
-                with engine.begin() as conn:
-                    conn.execute(
-                        _INSERT_PAGE,
-                        {
-                            "run_id": run_id,
-                            "tag": tag,
-                            "page_offset": offset,
-                            "url": url,
-                            "payload": json.dumps(payload),
-                        },
-                    )
-                result.pages_downloaded += 1
+            payload = _fetch_page(
+                engine,
+                client,
+                client.artist_search_request(tag, page_size, offset),
+                table="raw.musicbrainz_artist_search",
+                columns={"run_id": run_id, "tag": tag, "page_offset": offset},
+                max_age_days=max_age_days,
+                result=result,
+            )
             artists_on_page = len(payload.get("artists", []))
             logger.info("MusicBrainz tag=%r offset=%d: %d artists", tag, offset, artists_on_page)
             if artists_on_page < page_size:
@@ -150,10 +166,49 @@ def extract_artists_by_tag(
     return result
 
 
+def extract_recordings(
+    engine: Engine,
+    client: MusicBrainzClient,
+    recordings_per_artist: int,
+    run_id: str,
+    max_age_days: int = 30,
+) -> ExtractResult:
+    """Download recordings of every artist in staging.musicbrainz_artists into raw.
+
+    Needs the staging views to exist (they read raw live, so artists downloaded
+    a moment ago are already visible). One artist with 25 recordings = 1 request,
+    i.e. about 1 second because of the rate limit.
+    """
+    with engine.connect() as conn:
+        artist_mbids = list(
+            conn.execute(
+                text("SELECT mbid::text FROM staging.musicbrainz_artists ORDER BY mbid")
+            ).scalars()
+        )
+    result = ExtractResult()
+    page_size = min(MAX_PAGE_SIZE, recordings_per_artist)
+    for mbid in artist_mbids:
+        for offset in range(0, recordings_per_artist, page_size):
+            payload = _fetch_page(
+                engine,
+                client,
+                client.recording_browse_request(mbid, page_size, offset),
+                table="raw.musicbrainz_recording_browse",
+                columns={"run_id": run_id, "artist_mbid": mbid, "page_offset": offset},
+                max_age_days=max_age_days,
+                result=result,
+            )
+            if len(payload.get("recordings", [])) < page_size:
+                break  # the artist has no more recordings
+    logger.info("MusicBrainz recordings of %d artists: %s", len(artist_mbids), result)
+    return result
+
+
 @dataclass
 class PublishResult:
     artists_upserted: int
     genre_links_added: int
+    tracks_upserted: int
 
 
 def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
@@ -162,7 +217,9 @@ def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
     * every searched tag becomes a genre (if it does not exist yet),
     * artists are matched by mbid: new ones are inserted, known ones get the current name,
     * an artist is linked to every existing genre that matches one of its tags with
-      a positive vote count.
+      a positive vote count,
+    * recordings become tracks (matched by mbid); recordings without a length or that
+      are videos are skipped, because a track needs a positive duration.
     Running it twice changes nothing (ON CONFLICT), so it is safe to retry.
     Requires the staging layer to be built first.
     """
@@ -180,7 +237,8 @@ def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
             text(
                 """
                 INSERT INTO public.artists (name, mbid)
-                SELECT artist_name, mbid FROM staging.musicbrainz_artists
+                -- left(): MusicBrainz names can be longer than our column (varchar 200).
+                SELECT left(artist_name, 200), mbid FROM staging.musicbrainz_artists
                 ON CONFLICT (mbid) DO UPDATE SET name = EXCLUDED.name
                 """
             )
@@ -198,4 +256,18 @@ def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
                 """
             )
         ).rowcount
-    return PublishResult(artists_upserted=artists, genre_links_added=links)
+        tracks = conn.execute(
+            text(
+                """
+                INSERT INTO public.tracks (title, artist_id, duration_ms, mbid)
+                SELECT left(r.title, 300), a.id, r.length_ms, r.recording_mbid
+                FROM staging.musicbrainz_recordings AS r
+                JOIN public.artists AS a ON a.mbid = r.artist_mbid
+                WHERE r.length_ms > 0 AND NOT r.is_video
+                -- A known track gets the current title and length, but keeps its artist.
+                ON CONFLICT (mbid) DO UPDATE
+                    SET title = EXCLUDED.title, duration_ms = EXCLUDED.duration_ms
+                """
+            )
+        ).rowcount
+    return PublishResult(artists_upserted=artists, genre_links_added=links, tracks_upserted=tracks)

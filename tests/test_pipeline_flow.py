@@ -8,7 +8,15 @@ from sqlalchemy import text
 
 from pipeline import flows, musicbrainz
 from pipeline.quality import DataQualityError
-from tests.pipeline_helpers import MBID_A, FakeMusicBrainz, mb_artist, search_page
+from tests.pipeline_helpers import (
+    MBID_A,
+    REC_1,
+    FakeMusicBrainz,
+    mb_artist,
+    mb_recording,
+    recordings_page,
+    search_page,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -24,12 +32,15 @@ def use_test_database(engine, monkeypatch):
 
 
 def test_flow_builds_marts_and_imports_musicbrainz(db, factory, monkeypatch):
-    fake = FakeMusicBrainz({("jazz", 0): search_page([mb_artist(MBID_A, "Miles", country="US")])})
+    fake = FakeMusicBrainz(
+        {("jazz", 0): search_page([mb_artist(MBID_A, "Miles", country="US")])},
+        recordings={(MBID_A, 0): recordings_page([mb_recording(REC_1, "So What")])},
+    )
     monkeypatch.setattr(musicbrainz.MusicBrainzClient, "create", lambda contact=None: fake.client())
     track = factory.track(factory.artist("Local Band"))
     factory.plays(factory.listener(), track, datetime(2026, 1, 1, tzinfo=UTC))
 
-    flows.songly_pipeline(musicbrainz_tags=["jazz"], artists_per_tag=10)
+    flows.songly_pipeline(musicbrainz_tags=["jazz"], artists_per_tag=10, recordings_per_artist=5)
 
     result = db.execute(
         text(
@@ -38,6 +49,17 @@ def test_flow_builds_marts_and_imports_musicbrainz(db, factory, monkeypatch):
         )
     ).all()
     assert [tuple(r) for r in result] == [("Local Band", 1, None), ("Miles", 0, "US")]
+    new_track = db.execute(text("SELECT title FROM tracks WHERE mbid = :m"), {"m": REC_1})
+    assert new_track.scalar() == "So What"
+
+
+def test_flow_can_skip_recordings(db, monkeypatch):
+    fake = FakeMusicBrainz({("jazz", 0): search_page([mb_artist(MBID_A, "Miles")])})
+    monkeypatch.setattr(musicbrainz.MusicBrainzClient, "create", lambda contact=None: fake.client())
+
+    flows.songly_pipeline(musicbrainz_tags=["jazz"], recordings_per_artist=0)
+
+    assert fake.recording_requests() == []
 
 
 def test_flow_stops_on_failed_quality_check(db, factory):

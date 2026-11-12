@@ -2,7 +2,8 @@
 
 * The test database (TEST_DATABASE_URL) is wiped once per test run and rebuilt from the real
   Alembic migrations, so the tests also prove that the migrations work.
-* After every test all tables are truncated, so tests cannot affect each other.
+* After every test all tables are truncated and the derived schemas dropped,
+  so tests cannot affect each other.
 * The API under test gets its sessions from the test database via a dependency override.
 """
 
@@ -50,8 +51,14 @@ def db(engine: Engine) -> Iterator[Session]:
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     with session_factory() as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def clean_database(engine: Engine) -> Iterator[None]:
+    """Runs after EVERY test (autouse), also tests that use `engine` without `db`."""
+    yield
     with engine.begin() as conn:
-        tables = [*TABLES, "raw.musicbrainz_artist_search"]
+        tables = [*TABLES, "raw.musicbrainz_artist_search", "raw.musicbrainz_recording_browse"]
         conn.execute(text(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE"))
         # staging and marts are fully derived; the pipeline creates them again when needed.
         conn.execute(text("DROP SCHEMA IF EXISTS marts, staging CASCADE"))

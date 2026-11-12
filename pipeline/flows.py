@@ -40,6 +40,16 @@ def extract_musicbrainz(tags: list[str], artists_per_tag: int) -> musicbrainz.Ex
     return result
 
 
+@task(retries=3, retry_delay_seconds=30)
+def extract_musicbrainz_recordings(recordings_per_artist: int) -> musicbrainz.ExtractResult:
+    client = musicbrainz.MusicBrainzClient.create(get_settings().musicbrainz_contact)
+    result = musicbrainz.extract_recordings(
+        get_engine(), client, recordings_per_artist, run_id=str(flow_run.id or "local")
+    )
+    get_run_logger().info("MusicBrainz recordings: %s", result)
+    return result
+
+
 @task
 def build_staging() -> None:
     layers.build_staging(get_engine())
@@ -58,15 +68,24 @@ def build_marts() -> None:
 
 
 @flow(name="songly-pipeline")
-def songly_pipeline(musicbrainz_tags: list[str] | None = None, artists_per_tag: int = 25) -> None:
+def songly_pipeline(
+    musicbrainz_tags: list[str] | None = None,
+    artists_per_tag: int = 25,
+    recordings_per_artist: int = 25,
+) -> None:
     """sources -> (MusicBrainz -> raw) -> staging -> (catalog) -> marts, with checks between.
 
     Without `musicbrainz_tags` only the API data is processed (no network needed).
+    `recordings_per_artist=0` skips downloading recordings.
     """
     check_quality("sources", quality.SOURCE_CHECKS)
     if musicbrainz_tags:
         extract_musicbrainz(musicbrainz_tags, artists_per_tag)
     build_staging()
+    if musicbrainz_tags and recordings_per_artist > 0:
+        # Runs after build_staging because it reads the artist list from a staging view.
+        # Views read raw live, so the recordings are visible in staging right away.
+        extract_musicbrainz_recordings(recordings_per_artist)
     check_quality("staging", quality.STAGING_CHECKS)
     if musicbrainz_tags:
         # Staging views read the catalog live, so new artists reach the marts in this run.

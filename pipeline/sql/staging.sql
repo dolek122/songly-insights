@@ -74,3 +74,32 @@ SELECT
     (t.tag ->> 'count')::int AS votes
 FROM staging.musicbrainz_artists AS a
 CROSS JOIN LATERAL jsonb_array_elements(a.tags) AS t(tag);
+
+-- Recordings (tracks) of MusicBrainz artists. Like artists, raw keeps every downloaded
+-- page, so we keep only the newest version of each recording. A recording made by two
+-- artists is returned for both; we keep the artist of the newest page (raw id breaks ties).
+CREATE VIEW staging.musicbrainz_recordings AS
+WITH recordings AS (
+    SELECT r.id AS raw_id, r.loaded_at, r.artist_mbid, rec.recording
+    FROM raw.musicbrainz_recording_browse AS r
+    CROSS JOIN LATERAL jsonb_array_elements(r.payload -> 'recordings') AS rec(recording)
+),
+ranked AS (
+    SELECT
+        *,
+        row_number() OVER (
+            PARTITION BY recording ->> 'id' ORDER BY loaded_at DESC, raw_id DESC
+        ) AS version
+    FROM recordings
+)
+SELECT
+    (recording ->> 'id')::uuid AS recording_mbid,
+    artist_mbid,
+    trim(recording ->> 'title') AS title,
+    -- Length in milliseconds; MusicBrainz does not know it for every recording (NULL).
+    (recording ->> 'length')::int AS length_ms,
+    coalesce((recording ->> 'video')::boolean, false) AS is_video,
+    recording ->> 'first-release-date' AS first_release_date,
+    loaded_at
+FROM ranked
+WHERE version = 1;

@@ -28,6 +28,7 @@ najwyżej 1 zapytania na sekundę i nagłówka User-Agent z nazwą aplikacji i k
 
 - Zaimportowani artyści nie mają utworów ani odsłuchów (w `marts.artist_popularity` mają 0).
   Utwory (nagrania z MusicBrainz) i prawdziwe odsłuchy (ListenBrainz) to kolejne kroki.
+  Nagrania dodaje ADR 0008.
 - Tag usunięty w MusicBrainz nie usuwa powiązania z gatunkiem w katalogu (tylko dopisujemy).
 - Tagi to wolny tekst, więc dopasowanie do gatunków jest proste (równość nazw po
   normalizacji). Mapowanie synonimów (np. „hip-hop” → „hip hop”) można dodać później.

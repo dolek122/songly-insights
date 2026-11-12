@@ -2,13 +2,18 @@ import httpx
 import pytest
 from sqlalchemy import text
 
-from pipeline import layers, musicbrainz
+from pipeline import layers, musicbrainz, quality
 from tests.pipeline_helpers import (
     MBID_A,
     MBID_B,
     MBID_C,
+    REC_1,
+    REC_2,
+    REC_3,
     FakeMusicBrainz,
     mb_artist,
+    mb_recording,
+    recordings_page,
     search_page,
 )
 
@@ -162,3 +167,113 @@ def test_publish_is_idempotent_and_updates_names(engine, db):
 
     assert catalog(db) == [("Miles Davis", MBID_A, "jazz")]
     assert second.genre_links_added == 0
+
+
+# --- recordings -----------------------------------------------------------------------------
+
+
+def test_recording_browse_request():
+    request = FakeMusicBrainz({}).client().recording_browse_request(MBID_A, limit=25, offset=50)
+    assert request.url.path.endswith("/recording")
+    params = request.url.params
+    assert (params["artist"], params["limit"], params["offset"]) == (MBID_A, "25", "50")
+
+
+def load_artists(engine, *artists: dict) -> None:
+    """Land artists in raw and build staging (recordings are fetched for staging artists)."""
+    fake = FakeMusicBrainz({("jazz", 0): search_page(list(artists))})
+    musicbrainz.extract_artists_by_tag(engine, fake.client(), ["jazz"], 25, run_id="t")
+    layers.build_staging(engine)
+
+
+def test_extract_recordings_for_every_staging_artist(engine, db, monkeypatch):
+    monkeypatch.setattr(musicbrainz, "MAX_PAGE_SIZE", 2)
+    load_artists(engine, mb_artist(MBID_A, "A"), mb_artist(MBID_B, "B"))
+    fake = FakeMusicBrainz(
+        {},
+        recordings={
+            (MBID_A, 0): recordings_page([mb_recording(REC_1, "One"), mb_recording(REC_2, "Two")]),
+            (MBID_A, 2): recordings_page([mb_recording(REC_3, "Three")], offset=2),
+        },
+    )
+
+    result = musicbrainz.extract_recordings(engine, fake.client(), 10, run_id="t")
+
+    # A: page 0 is full, page 2 is short -> stop. B: page 0 is empty -> stop.
+    assert fake.recording_requests() == [(MBID_A, 0), (MBID_A, 2), (MBID_B, 0)]
+    assert result.pages_downloaded == 3
+    # Staging views read raw live: no rebuild needed to see the recordings.
+    titles = db.execute(text("SELECT title FROM staging.musicbrainz_recordings ORDER BY title"))
+    assert titles.scalars().all() == ["One", "Three", "Two"]
+
+
+def test_extract_recordings_uses_raw_as_cache(engine):
+    load_artists(engine, mb_artist(MBID_A, "A"))
+    fake = FakeMusicBrainz(
+        {}, recordings={(MBID_A, 0): recordings_page([mb_recording(REC_1, "x")])}
+    )
+    musicbrainz.extract_recordings(engine, fake.client(), 10, run_id="first")
+
+    again = musicbrainz.extract_recordings(engine, fake.client(), 10, run_id="second")
+
+    assert (again.pages_downloaded, again.pages_from_cache) == (0, 1)
+    assert len(fake.recording_requests()) == 1
+
+
+def publish_with_recordings(engine, recordings: list[dict], tags=("jazz",)):
+    load_artists(engine, mb_artist(MBID_A, "Miles"))
+    fake = FakeMusicBrainz({}, recordings={(MBID_A, 0): recordings_page(recordings)})
+    musicbrainz.extract_recordings(engine, fake.client(), 25, run_id="t", max_age_days=0)
+    return musicbrainz.publish_to_catalog(engine, list(tags))
+
+
+def tracks(db) -> list[tuple]:
+    sql = """
+        SELECT t.title, t.duration_ms, t.mbid::text, a.name
+        FROM tracks t JOIN artists a ON a.id = t.artist_id ORDER BY t.title
+    """
+    return [tuple(r) for r in db.execute(text(sql))]
+
+
+def test_publish_turns_recordings_into_tracks(engine, db):
+    result = publish_with_recordings(
+        engine,
+        [
+            mb_recording(REC_1, "So What", length=545_000),
+            mb_recording(REC_2, "No Length", length=None),
+            mb_recording(REC_3, "Live Video", video=True),
+        ],
+    )
+
+    # Recordings without a length or that are videos are skipped.
+    assert tracks(db) == [("So What", 545_000, REC_1, "Miles")]
+    assert result.tracks_upserted == 1
+
+
+def test_publish_tracks_is_idempotent_and_updates_title(engine, db):
+    publish_with_recordings(engine, [mb_recording(REC_1, "So What", length=545_000)])
+
+    second = publish_with_recordings(
+        engine, [mb_recording(REC_1, "So What (Remastered)", length=546_000)]
+    )
+
+    assert tracks(db) == [("So What (Remastered)", 546_000, REC_1, "Miles")]
+    assert second.tracks_upserted == 1  # updated, not inserted again
+
+
+def test_publish_shortens_too_long_titles(engine, db):
+    publish_with_recordings(engine, [mb_recording(REC_1, "x" * 400)])
+    assert len(tracks(db)[0][0]) == 300
+
+
+def test_staging_flags_recordings_without_length(engine):
+    load_artists(engine, mb_artist(MBID_A, "A"))
+    fake = FakeMusicBrainz(
+        {}, recordings={(MBID_A, 0): recordings_page([mb_recording(REC_1, "x", length=None)])}
+    )
+    musicbrainz.extract_recordings(engine, fake.client(), 10, run_id="t")
+
+    results = quality.run_checks(engine, quality.STAGING_CHECKS)
+
+    failed = [(r.check.name, r.check.severity) for r in results if not r.passed]
+    assert failed == [("musicbrainz_recordings_have_length", "warn")]

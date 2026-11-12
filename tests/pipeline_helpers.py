@@ -7,6 +7,9 @@ from pipeline.musicbrainz import MusicBrainzClient
 MBID_A = "11111111-1111-4111-8111-111111111111"
 MBID_B = "22222222-2222-4222-8222-222222222222"
 MBID_C = "33333333-3333-4333-8333-333333333333"
+REC_1 = "aaaaaaaa-0000-4000-8000-000000000001"
+REC_2 = "aaaaaaaa-0000-4000-8000-000000000002"
+REC_3 = "aaaaaaaa-0000-4000-8000-000000000003"
 
 
 def mb_artist(mbid: str, name: str, tags=(("jazz", 3),), country: str | None = "GB") -> dict:
@@ -27,11 +30,38 @@ def search_page(artists: list[dict], offset: int = 0) -> dict:
     return {"created": "2026-11-12T00:00:00Z", "count": 1000, "offset": offset, "artists": artists}
 
 
-class FakeMusicBrainz:
-    """Answers search requests from a dict {(tag, offset): page} and records every request."""
+def mb_recording(mbid: str, title: str, length: int | None = 200_000, video: bool = False) -> dict:
+    """One recording in the shape returned by /ws/2/recording?artist=<mbid>&fmt=json."""
+    return {
+        "id": mbid,
+        "title": title,
+        "length": length,
+        "video": video,
+        "disambiguation": "",
+        "first-release-date": "1959-08-17",
+    }
 
-    def __init__(self, pages: dict[tuple[str, int], dict], status_code: int = 200) -> None:
+
+def recordings_page(recordings: list[dict], offset: int = 0) -> dict:
+    return {"recording-count": 1000, "recording-offset": offset, "recordings": recordings}
+
+
+class FakeMusicBrainz:
+    """A fake MusicBrainz API that records every request.
+
+    `pages` answers artist searches: {(tag, offset): page}.
+    `recordings` answers recording browsing: {(artist_mbid, offset): page}.
+    Anything not listed gets an empty page.
+    """
+
+    def __init__(
+        self,
+        pages: dict[tuple[str, int], dict],
+        status_code: int = 200,
+        recordings: dict[tuple[str, int], dict] | None = None,
+    ) -> None:
         self.pages = pages
+        self.recordings = recordings or {}
         self.status_code = status_code
         self.requests: list[httpx.Request] = []
 
@@ -39,9 +69,21 @@ class FakeMusicBrainz:
         self.requests.append(request)
         if self.status_code != 200:
             return httpx.Response(self.status_code, json={"error": "busy"})
-        tag = request.url.params["query"].removeprefix('tag:"').removesuffix('"')
-        page = self.pages.get((tag, int(request.url.params["offset"])), search_page([]))
+        params = request.url.params
+        offset = int(params["offset"])
+        if request.url.path.endswith("/recording"):
+            page = self.recordings.get((params["artist"], offset), recordings_page([]))
+        else:
+            tag = params["query"].removeprefix('tag:"').removesuffix('"')
+            page = self.pages.get((tag, offset), search_page([]))
         return httpx.Response(200, json=page)
+
+    def recording_requests(self) -> list[tuple[str, int]]:
+        return [
+            (r.url.params["artist"], int(r.url.params["offset"]))
+            for r in self.requests
+            if r.url.path.endswith("/recording")
+        ]
 
     def client(self) -> MusicBrainzClient:
         http = httpx.Client(

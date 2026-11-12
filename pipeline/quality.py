@@ -67,6 +67,21 @@ STAGING_CHECKS = [
         severity="warn",
     ),
     Check(
+        "musicbrainz_recordings_mbid_unique",
+        "SELECT recording_mbid FROM staging.musicbrainz_recordings "
+        "GROUP BY recording_mbid HAVING count(*) > 1",
+    ),
+    Check(
+        "musicbrainz_recordings_title_not_empty",
+        "SELECT recording_mbid FROM staging.musicbrainz_recordings WHERE coalesce(title, '') = ''",
+    ),
+    Check(
+        # Not an error: such recordings are simply not published as tracks.
+        "musicbrainz_recordings_have_length",
+        "SELECT recording_mbid FROM staging.musicbrainz_recordings WHERE length_ms IS NULL",
+        severity="warn",
+    ),
+    Check(
         "musicbrainz_country_is_iso_code",
         "SELECT mbid FROM staging.musicbrainz_artists WHERE country !~ '^[A-Z]{2}$'",
         severity="warn",

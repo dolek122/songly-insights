@@ -35,7 +35,7 @@ and explain non-obvious choices.
 - Do not build features on the Spotify Web API: new apps lost most endpoints in 2024-2026.
   Data comes from the synthetic generator, MusicBrainz and optionally ListenBrainz (ADR 0004).
 
-## Pipeline (Stage 2, see ADRs 0005 and 0006)
+## Pipeline (Stage 2, see ADRs 0005, 0006 and 0008)
 
 - Schemas: `raw` (external data as received, append-only, created by migration 0002),
   `staging` (views, clean + rename only), `marts` (analytics tables). staging and marts are
@@ -43,7 +43,10 @@ and explain non-obvious choices.
 - Logic lives in plain modules (`pipeline/layers.py`, `quality.py`, `musicbrainz.py`);
   `pipeline/flows.py` only wires them into Prefect tasks. Keep Prefect out of the other modules.
 - Data quality checks are SQL returning violating rows; add one for every new mart.
+- MusicBrainz: artists by tag and their recordings (browse) land in `raw`; both go through
+  `_fetch_page` (cache + append). Recordings become `public.tracks` matched by mbid.
 - Tests never call MusicBrainz: use `tests/pipeline_helpers.py` (httpx MockTransport).
+  Database cleanup runs after every test (`clean_database`, autouse); add new raw tables there.
 - The pipeline writes to `public` only in `publish_to_catalog`.
 
 ## Statistics read marts (ADR 0007)

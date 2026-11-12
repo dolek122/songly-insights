@@ -21,6 +21,12 @@ def build_parser() -> argparse.ArgumentParser:
             help="Import MusicBrainz artists with this tag (repeatable). Needs internet.",
         )
         cmd.add_argument("--artists-per-tag", type=int, default=25)
+        cmd.add_argument(
+            "--recordings-per-artist",
+            type=int,
+            default=25,
+            help="Recordings to import per MusicBrainz artist (0 = none)",
+        )
         if name == "serve":
             cmd.add_argument("--cron", default="15 3 * * *", help="Schedule, UTC (cron syntax)")
     return parser
@@ -28,7 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    params = {"musicbrainz_tags": args.tags, "artists_per_tag": args.artists_per_tag}
+    params = {
+        "musicbrainz_tags": args.tags,
+        "artists_per_tag": args.artists_per_tag,
+        "recordings_per_artist": args.recordings_per_artist,
+    }
     if args.command == "run":
         songly_pipeline(**params)
     else:

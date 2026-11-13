@@ -64,6 +64,7 @@ def clean_database(engine: Engine) -> Iterator[None]:
             "raw.musicbrainz_recording_browse",
             "raw.listenbrainz_listens",
             "ops.pipeline_runs",
+            "ops.backups",
         ]
         conn.execute(text(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE"))
         # staging and marts are fully derived; the pipeline creates them again when needed.

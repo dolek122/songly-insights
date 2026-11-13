@@ -43,3 +43,14 @@ def _refresh(session: Session) -> None:
         text("SELECT max(finished_at) FROM ops.pipeline_runs WHERE status = 'completed'")
     )
     metrics.PIPELINE_LAST_SUCCESS.set(last_success.timestamp() if last_success else math.nan)
+
+    # Backups (ADR 0017). 0 instead of NaN when there is none: the backup service makes one
+    # as soon as it starts, so "no backup" for long is a real problem and must alert.
+    last_backup = session.execute(
+        text("SELECT status FROM ops.backups WHERE status <> 'running' ORDER BY id DESC LIMIT 1")
+    ).one_or_none()
+    metrics.BACKUP_LAST_FAILED.set(1 if last_backup and last_backup.status == "failed" else 0)
+    last_good = session.scalar(
+        text("SELECT max(finished_at) FROM ops.backups WHERE status = 'completed' AND verified")
+    )
+    metrics.BACKUP_LAST_SUCCESS.set(last_good.timestamp() if last_good else 0)

@@ -14,8 +14,9 @@ and explain non-obvious choices.
 - Run: `uvicorn app.main:app --reload` (statistics need `python -m pipeline run` first)
 - Pipeline: `python -m pipeline run` (add `--musicbrainz-tag jazz` / `--listenbrainz-user name`
   to import MusicBrainz / ListenBrainz; needs internet)
-- Full stack (Stage 4): `docker compose --profile full up -d --build` (API :8000, Grafana :3000,
-  Prometheus :9090, Alertmanager :9093, Prefect :4200); seed/pipeline via `docker compose --profile full run --rm pipeline ...`
+- Full stack (Stage 4): `docker compose --profile full up -d --build` (HTTPS via Caddy:
+  https://api.localhost, https://grafana.localhost; Prometheus :9090, Alertmanager :9093,
+  Prefect :4200 on 127.0.0.1 only); seed/pipeline via `docker compose --profile full run --rm pipeline ...`
 - Alert rules: `promtool test rules deploy/prometheus/alerts_test.yml` (CI runs it in Docker)
 - Tests: `pytest` (needs PostgreSQL; the schema is built from the real migrations)
 - Quality gate before every commit: `ruff check . && ruff format --check . && pytest`
@@ -80,7 +81,7 @@ and explain non-obvious choices.
 - The seed generator produces sessions and slow artist popularity trends; keep demo data realistic
   enough for new statistics to show something.
 
-## Deployment and monitoring (Stage 4, ADRs 0013-0015)
+## Deployment and monitoring (Stage 4, ADRs 0013-0018)
 
 - One image (`Dockerfile`) for API, migrations, pipeline and Prefect server; services in
   `docker-compose.yml` (profile `full`) differ only by command. Runs as non-root user `songly`.
@@ -93,3 +94,9 @@ and explain non-obvious choices.
 - Alertmanager sends alerts to Discord (`deploy/alertmanager/`); the webhook URL is a compose
   secret from `DISCORD_WEBHOOK_URL` (read via `webhook_url_file`), never in the repo. Every alert
   rule needs a human-readable `summary` annotation: it is the text of the Discord message.
+- Only Caddy (80/443) is public; every other published port must be bound to 127.0.0.1
+  (Docker's published ports bypass host firewalls). `/metrics` is blocked in the Caddyfile.
+- Backups: `deploy/backup/backup.sh` (postgres image) dumps daily, test-restores every dump,
+  rotates, and records results in `ops.backups` (metrics + BackupMissing/BackupFailed alerts).
+- Logs: `LOG_FORMAT=json` (Docker) gives JSON lines via `app/logging_config.py`; the middleware
+  in `app/metrics.py` sets the request id (ContextVar, `X-Request-ID`) and writes the access log.

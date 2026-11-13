@@ -74,3 +74,22 @@ groups:
           severity: info
         annotations:
           summary: "{{ $value }} data quality warnings in the newest pipeline run."
+
+  - name: backups
+    rules:
+      - alert: BackupMissing
+        # Backups run daily; 26 hours leaves room for a slow or late one. Also fires when
+        # there has never been a backup (the metric is 0 then).
+        expr: time() - songly_backup_last_success_timestamp_seconds > 26 * 3600
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: No verified database backup in the last 26 hours (see the backup container log).
+
+      - alert: BackupFailed
+        expr: songly_backup_last_failed == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: The newest database backup failed (pg_dump or its test restore).

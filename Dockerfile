@@ -36,4 +36,5 @@ RUN mkdir -p /home/songly/.prefect
 
 EXPOSE 8000
 # One worker on purpose: Prometheus metrics live in the process memory (app/metrics.py).
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --no-access-log: the app writes its own access log as JSON, with the request id (ADR 0018).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

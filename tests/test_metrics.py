@@ -129,3 +129,24 @@ def test_metrics_work_when_the_database_is_down():
     # Prometheus still gets an answer; the problem is visible as a metric.
     assert response.status_code == 200
     assert gauge("songly_database_up") == 0
+
+
+def test_backup_metrics(client, db):
+    client.get("/metrics")
+    assert gauge("songly_backup_last_success_timestamp_seconds") == 0  # never
+
+    db.execute(
+        text(
+            """
+            INSERT INTO ops.backups (finished_at, status, verified) VALUES
+                ('2026-01-01T02:31Z', 'completed', true),
+                ('2026-01-02T02:31Z', 'completed', false),  -- not verified: does not count
+                ('2026-01-03T02:31Z', 'failed', false)
+            """
+        )
+    )
+    db.commit()
+    client.get("/metrics")
+
+    assert gauge("songly_backup_last_success_timestamp_seconds") == 1767234660
+    assert gauge("songly_backup_last_failed") == 1

@@ -54,3 +54,30 @@ tests:
               severity: warning
             exp_annotations:
               summary: More than 5% of API requests fail with a server error.
+
+  - interval: 1m
+    input_series:
+      # In promtool tests time() starts at 0, so the last good backup is put 26 h 7 min
+      # before the start: too old from the first minute, firing once "for: 15m" has passed.
+      - series: songly_backup_last_success_timestamp_seconds
+        values: "-94000x30"
+      - series: songly_backup_last_failed
+        values: "0 1"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: BackupMissing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: BackupMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: No verified database backup in the last 26 hours (see the backup container log).
+      - eval_time: 1m
+        alertname: BackupFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: The newest database backup failed (pg_dump or its test restore).

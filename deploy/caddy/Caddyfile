@@ -1,0 +1,30 @@
+# Caddy: the only service reachable from the internet (ADR 0016).
+# For a real domain Caddy gets and renews a Let's Encrypt certificate by itself
+# (DNS of the domain must point to the server, ports 80 and 443 open).
+# For *.localhost it uses its own local certificate authority (browsers will warn).
+
+(common) {
+	# Compress text responses (JSON, HTML).
+	encode zstd gzip
+	header {
+		# Browsers: use only HTTPS for this site for a year.
+		Strict-Transport-Security "max-age=31536000"
+		# Browsers: do not guess content types.
+		X-Content-Type-Options "nosniff"
+		# Do not advertise the server software.
+		-Server
+	}
+}
+
+{$API_DOMAIN:api.localhost} {
+	import common
+	# Metrics are for Prometheus inside the Docker network, not for the internet.
+	@metrics path /metrics
+	respond @metrics 404
+	reverse_proxy api:8000
+}
+
+{$GRAFANA_DOMAIN:grafana.localhost} {
+	import common
+	reverse_proxy grafana:3000
+}

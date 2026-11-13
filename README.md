@@ -156,8 +156,9 @@ Szczegóły: [ADR 0005](docs/adr/0005-warstwy-danych-i-prefect.md),
 
 ## Wdrożenie (etap 4)
 
-Cały system w Dockerze: API, PostgreSQL, pipeline z harmonogramem, Prefect, Prometheus
-i Grafana ([ADR 0013](docs/adr/0013-wdrozenie-docker.md)).
+Cały system w Dockerze: API, PostgreSQL, pipeline z harmonogramem, Prefect, Prometheus,
+Alertmanager, Grafana, HTTPS (Caddy) i codzienne kopie zapasowe
+([ADR 0013](docs/adr/0013-wdrozenie-docker.md)).
 
 ```bash
 cp .env.example .env      # na serwerze: zmień wszystkie hasła!
@@ -166,17 +167,66 @@ docker compose --profile full run --rm pipeline python -m app.cli seed --reset -
 docker compose --profile full run --rm pipeline python -m pipeline run
 ```
 
+Masz `.env` z wcześniejszych etapów? Dopisz brakujące klucze z `.env.example`
+(compose wymaga m.in. `DISCORD_WEBHOOK_URL`, choćby pustego).
+
 | Usługa | Adres | Co robi |
 |---|---|---|
-| API | <http://localhost:8000/docs> | Endpointy; `/metrics` dla Prometheusa |
-| Grafana | <http://localhost:3000> (admin / `GRAFANA_ADMIN_PASSWORD`) | Dashboardy w folderze „Songly Insights” |
-| Prometheus | <http://localhost:9090/alerts> | Metryki i alerty |
-| Prefect | <http://localhost:4200> | Przebiegi pipeline'u; codziennie o `PIPELINE_CRON` (UTC) |
-| Alertmanager | <http://localhost:9093> | Wysyłka alertów na Discord, wyciszenia |
+| API | <https://api.localhost/docs> | Endpointy przez HTTPS |
+| Grafana | <https://grafana.localhost> (admin / `GRAFANA_ADMIN_PASSWORD`) | Dashboardy w folderze „Songly Insights” |
+| Prometheus | <http://localhost:9090/alerts> | Metryki i alerty (tylko z serwera) |
+| Alertmanager | <http://localhost:9093> | Wysyłka alertów na Discord, wyciszenia (tylko z serwera) |
+| Prefect | <http://localhost:4200> | Przebiegi pipeline'u; codziennie o `PIPELINE_CRON` UTC (tylko z serwera) |
 
 Migracje wykonuje jednorazowa usługa `migrate` przed startem API. CI publikuje gotowy obraz
 w GitHub Container Registry; na serwerze wystarczy ustawić `SONGLY_IMAGE` w `.env`
 i pominąć `--build`.
+
+### HTTPS i dostęp z zewnątrz
+
+[ADR 0016](docs/adr/0016-https-i-siec.md): z internetu widać tylko Caddy (porty 80 i 443).
+Na serwerze ustaw w `.env` domeny `API_DOMAIN` i `GRAFANA_DOMAIN`, skieruj ich rekordy DNS
+na serwer, a Caddy sam pobierze certyfikaty Let's Encrypt. Pozostałe usługi słuchają tylko
+na `127.0.0.1`; z laptopa otwórz je przez tunel SSH:
+
+```bash
+ssh -L 9090:localhost:9090 -L 9093:localhost:9093 -L 4200:localhost:4200 uzytkownik@serwer
+```
+
+Lokalnie `*.localhost` używa certyfikatu z lokalnego CA Caddy, więc przeglądarka ostrzeże
+przy pierwszym wejściu.
+
+### Kopie zapasowe
+
+[ADR 0017](docs/adr/0017-kopie-zapasowe.md): usługa `backup` robi kopię od razu po starcie,
+a potem codziennie o `BACKUP_TIME` (UTC). Każdą kopię odtwarza próbnie do tymczasowej bazy
+i usuwa pliki starsze niż `BACKUP_KEEP_DAYS` dni. Pliki trafiają do `./backups`. Brak
+zweryfikowanej kopii przez 26 h wywołuje alert `BackupMissing`.
+
+```bash
+docker compose --profile full run --rm backup once        # kopia na żądanie
+```
+
+Odtworzenie bazy z kopii:
+
+```bash
+docker compose --profile full stop api pipeline
+docker compose --profile full run --rm backup restore /backups/insights-20261113T023000Z.dump
+docker compose --profile full start api pipeline
+```
+
+Odtwarzanie działa w jednej transakcji: jeśli się nie uda, baza zostaje bez zmian. Kopie
+leżą na tym samym serwerze, więc warto je dodatkowo kopiować poza niego.
+
+### Logi
+
+[ADR 0018](docs/adr/0018-logi-json.md): w Dockerze API loguje w formacie JSON, jedną linię
+na zapytanie, z `request_id` (zwracanym też w nagłówku `X-Request-ID`):
+
+```bash
+docker compose logs --no-log-prefix api | jq 'select(.status >= 500)'
+docker compose logs --no-log-prefix api | jq 'select(.request_id == "ID-Z-NAGŁÓWKA")'
+```
 
 ## Monitoring i dashboardy
 
@@ -215,7 +265,8 @@ app/
   routers/         warstwa HTTP (cienka): parametry -> serwis -> odpowiedź
   services/        logika i zapytania: katalog, import odsłuchów, statystyki, sesje, trendy,
                    podobieństwo słuchaczy, stan danych dla monitoringu
-  metrics.py       metryki Prometheusa i middleware mierzące zapytania
+  metrics.py       metryki Prometheusa i middleware: metryki, request id, log dostępu
+  logging_config.py  logi JSON
   schemas/         modele Pydantic (kontrakt API)
   seed/            deterministyczny generator danych i loader
   cli.py           python -m app.cli seed
@@ -227,8 +278,8 @@ pipeline/
   musicbrainz.py   klient MusicBrainz, artyści i nagrania do raw, publikacja do katalogu
   listenbrainz.py  klient ListenBrainz, przyrostowy import odsłuchów, publikacja zdarzeń
   flows.py         flow Prefect łączący kroki
-deploy/            konfiguracja Prometheusa (alerty + testy), Alertmanagera (Discord)
-                   i Grafany (dashboardy jako JSON)
+deploy/            konfiguracja Prometheusa (alerty + testy), Alertmanagera (Discord),
+                   Grafany (dashboardy jako JSON), Caddy (HTTPS) i skrypt kopii zapasowych
 migrations/        migracje Alembic
 tests/             testy na prawdziwym PostgreSQL
 docs/adr/          zapisy decyzji architektonicznych
@@ -263,6 +314,9 @@ GitHub Actions przy każdym pushu.
 - [ADR 0013: Wdrożenie w Dockerze](docs/adr/0013-wdrozenie-docker.md)
 - [ADR 0014: Monitoring i dashboardy](docs/adr/0014-monitoring-i-dashboardy.md)
 - [ADR 0015: Wysyłka alertów na Discord](docs/adr/0015-alertmanager-discord.md)
+- [ADR 0016: HTTPS przez Caddy i ograniczenie portów](docs/adr/0016-https-i-siec.md)
+- [ADR 0017: Kopie zapasowe z testem odtworzenia](docs/adr/0017-kopie-zapasowe.md)
+- [ADR 0018: Logi JSON z identyfikatorem zapytania](docs/adr/0018-logi-json.md)
 
 ## Roadmapa
 
@@ -273,6 +327,10 @@ GitHub Actions przy każdym pushu.
    przyrostowy import odsłuchów z ListenBrainz.
    Statystyki API czytają marts.
 3. **Etap 3: analityka zachowań** (gotowe): sesje słuchania, trendy, podobieństwo słuchaczy.
-4. **Etap 4: wdrożenie i monitoring** (w toku): obraz Dockera i pełny stos w compose, obraz
-   publikowany przez CI, metryki i alerty w Prometheusie, wysyłka alertów na Discord,
-   dashboardy w Grafanie (gotowe). Dalej: HTTPS, kopie zapasowe bazy, logi w formacie JSON.
+4. **Etap 4: wdrożenie i monitoring** (gotowe): obraz Dockera i pełny stos w compose, obraz
+   publikowany przez CI, HTTPS (Caddy), metryki i alerty w Prometheusie z wysyłką na Discord,
+   dashboardy w Grafanie, codzienne kopie zapasowe z testem odtworzenia, logi JSON.
+
+Możliwe dalsze kroki (opisane w ADR-ach): kopie zapasowe poza serwerem, logi zebrane w jednym
+miejscu (Loki), ważenie podobieństwa słuchaczy w stylu TF-IDF, statystyki w strefie czasowej
+użytkownika.

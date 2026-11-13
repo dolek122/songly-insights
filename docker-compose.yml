@@ -4,6 +4,11 @@
 # See ADR 0013 and the "Wdrożenie" section of README.md.
 #
 # Passwords come from .env (see .env.example). The defaults are for a local machine only.
+#
+# Network (ADR 0016): only Caddy (ports 80/443) is reachable from outside. Every other port
+# is bound to 127.0.0.1, i.e. reachable only from the server itself (use an SSH tunnel:
+# ssh -L 9090:localhost:9090 server). This matters because Docker's published ports
+# bypass host firewalls like ufw.
 
 x-app: &app
   image: ${SONGLY_IMAGE:-songly-insights:local}
@@ -13,6 +18,8 @@ x-app: &app
     DATABASE_URL: postgresql+psycopg://songly:${POSTGRES_PASSWORD:-songly}@db:5432/insights
     MUSICBRAINZ_CONTACT: ${MUSICBRAINZ_CONTACT:-}
     PREFECT_API_URL: http://prefect:4200/api
+    # One JSON object per log line (ADR 0018); `docker compose logs api | jq` can filter it.
+    LOG_FORMAT: json
     # Prefect would otherwise send anonymous usage statistics.
     PREFECT_SERVER_ANALYTICS_ENABLED: "false"
 
@@ -25,7 +32,7 @@ services:
       POSTGRES_DB: insights
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Scripts in this folder run once, when the data volume is created.
@@ -50,7 +57,7 @@ services:
   api:
     <<: *app
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -72,7 +79,7 @@ services:
       # package) is not writable for the non-root user.
       PREFECT_UI_STATIC_DIRECTORY: /home/songly/.prefect/ui
     ports:
-      - "4200:4200"
+      - "127.0.0.1:4200:4200"
     volumes:
       - prefect:/home/songly/.prefect
     healthcheck:
@@ -102,12 +109,56 @@ services:
       # The address people use to open Prometheus; links in alert messages point here.
       - --web.external-url=${PROMETHEUS_EXTERNAL_URL:-http://localhost:9090}
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./deploy/prometheus:/etc/prometheus:ro
       - prometheus:/prometheus
     depends_on:
       - alertmanager
+    restart: unless-stopped
+
+  # HTTPS reverse proxy for the API and Grafana (ADR 0016).
+  caddy:
+    image: caddy:2.10
+    profiles: [full]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.localhost}
+      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN:-grafana.localhost}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here: keep the volume, or Let's Encrypt limits may be hit.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - grafana
+    restart: unless-stopped
+
+  # Daily pg_dump + test restore + rotation (ADR 0017). Dumps land in ./backups on the host.
+  backup:
+    image: postgres:16
+    profiles: [full]
+    entrypoint: ["bash", "/scripts/backup.sh"]
+    # Default mode. Other modes: docker compose --profile full run --rm backup once
+    #                            docker compose --profile full run --rm backup restore /backups/FILE
+    command: ["loop"]
+    environment:
+      PGHOST: db
+      PGUSER: songly
+      PGPASSWORD: ${POSTGRES_PASSWORD:-songly}
+      PGDATABASE: insights
+      BACKUP_TIME: ${BACKUP_TIME:-02:30}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+    volumes:
+      - ./deploy/backup:/scripts:ro
+      - ./backups:/backups
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # Sends notifications for alerts fired by Prometheus (ADR 0015). UI on :9093.
@@ -120,7 +171,7 @@ services:
       # The address people use to open Alertmanager; used in the "Alerts:" link of messages.
       - --web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://localhost:9093}
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
     volumes:
       - ./deploy/alertmanager:/etc/alertmanager:ro
       # Remembers silences and which notifications were already sent across restarts.
@@ -136,10 +187,12 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # The public HTTPS address (behind Caddy); Grafana builds its links from it.
+      GF_SERVER_ROOT_URL: https://${GRAFANA_DOMAIN:-grafana.localhost}
       # Read by the data source file (deploy/grafana/provisioning/datasources).
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -154,10 +207,13 @@ volumes:
   prometheus:
   alertmanager:
   grafana:
+  caddy_data:
+  caddy_config:
 
 # Secrets are mounted as files in /run/secrets/ of the services that ask for them, instead
 # of environment variables (which are visible e.g. in `docker inspect`).
 secrets:
   discord_webhook_url:
-    # Read from DISCORD_WEBHOOK_URL (set it in .env).
+    # Read from DISCORD_WEBHOOK_URL in .env. The variable must exist (compose refuses to
+    # start otherwise), but it may be empty: then notifications are not sent.
     environment: DISCORD_WEBHOOK_URL

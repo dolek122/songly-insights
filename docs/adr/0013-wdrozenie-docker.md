@@ -34,8 +34,8 @@ chmurze, a instrukcja ma działać na dowolnym serwerze z Dockerem (np. tani VPS
 ## Konsekwencje
 
 - Wdrożenie na serwer: skopiować repozytorium (lub sam `docker-compose.yml` i `deploy/`),
-  ustawić `.env`, `docker compose --profile full up -d`. Brakuje jeszcze: HTTPS (reverse
-  proxy, np. Caddy), kopii zapasowych bazy i ograniczenia portów tylko do potrzebnych.
+  ustawić `.env`, `docker compose --profile full up -d`. HTTPS i ograniczenie portów dodaje
+  ADR 0016, kopie zapasowe ADR 0017.
 - Obraz ma ok. 0,5 GB, głównie przez Prefect. Osobny, mniejszy obraz dla API byłby możliwy,
   ale kosztem drugiego Dockerfile.
 - Skrypty w `docker/initdb` działają tylko przy tworzeniu wolumenu bazy; zmiana haseł na

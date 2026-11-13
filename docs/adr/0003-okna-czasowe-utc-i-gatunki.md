@@ -1,6 +1,7 @@
 # ADR 0003: Okna czasowe, dni w UTC i liczenie gatunków
 
-Status: zaakceptowana · Data: 2026-11-09
+Status: zaakceptowana · Data: 2026-11-09 · Częściowo zmieniona przez ADR 0007
+(statystyki przyjmują tylko pełne dni UTC)
 
 ## Kontekst
 

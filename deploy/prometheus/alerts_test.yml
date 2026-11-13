@@ -1,0 +1,83 @@
+# Unit tests of the alert rules: promtool test rules deploy/prometheus/alerts_test.yml
+# Each test feeds made-up metric values and checks which alerts fire at a given time.
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # 25 h 50 min old at the start, growing by 60 s per minute: crosses 26 h after
+      # 10 minutes, and the alert fires after another 10 minutes ("for: 10m").
+      - series: songly_marts_age_seconds
+        values: "93000+60x30"
+      - series: songly_pipeline_last_run_failed
+        values: "0 0 1 1 1"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MartsStale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: MartsStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Marts are older than 26 hours; the daily pipeline did not finish.
+      - eval_time: 1m
+        alertname: PipelineFailed
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: PipelineFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: The newest pipeline run failed (see the Prefect UI on :4200).
+
+  - interval: 1m
+    input_series:
+      - series: 'songly_http_requests_total{route="/x", status="200"}'
+        values: "0+90x10"
+      - series: 'songly_http_requests_total{route="/x", status="500"}'
+        values: "0+10x10"
+    alert_rule_test:
+      # 10% errors, but only for 4 minutes: "for: 5m" is not reached yet.
+      - eval_time: 4m
+        alertname: HighErrorRate
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: More than 5% of API requests fail with a server error.
+
+  - interval: 1m
+    input_series:
+      # In promtool tests time() starts at 0, so the last good backup is put 26 h 7 min
+      # before the start: too old from the first minute, firing once "for: 15m" has passed.
+      - series: songly_backup_last_success_timestamp_seconds
+        values: "-94000x30"
+      - series: songly_backup_last_failed
+        values: "0 1"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: BackupMissing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: BackupMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: No verified database backup in the last 26 hours (see the backup container log).
+      - eval_time: 1m
+        alertname: BackupFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: The newest database backup failed (pg_dump or its test restore).

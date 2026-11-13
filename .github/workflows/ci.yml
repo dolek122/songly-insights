@@ -34,3 +34,61 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+
+  # Prometheus and Alertmanager configuration, unit tests of the alert rules (ADR 0014, 0015).
+  alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Prometheus config and test alert rules
+        run: |
+          promtool() {
+            docker run --rm --entrypoint promtool -v "$PWD/deploy/prometheus:/p" -w /p \
+              prom/prometheus:v3.5.0 "$@"
+          }
+          promtool check config prometheus.yml
+          promtool test rules alerts_test.yml
+      - name: Check Alertmanager config and message templates
+        run: |
+          docker run --rm --entrypoint amtool \
+            -v "$PWD/deploy/alertmanager:/etc/alertmanager" prom/alertmanager:v0.28.1 \
+            check-config /etc/alertmanager/alertmanager.yml
+
+  # Builds the Docker image on every push; publishes it to GitHub Container Registry
+  # (ghcr.io/<owner>/<repo>) only from the default branch (ADR 0013).
+  image:
+    needs: [quality, alerts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # "sha-1a2b3c4" for every build, "latest" for the default branch.
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Reuse layers between builds (the dependency layer rarely changes).
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

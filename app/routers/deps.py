@@ -5,7 +5,10 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import Depends, Query
+from sqlalchemy.orm import Session
 
+from app.db import get_db
+from app.services import stats
 from app.services.time_window import TimeWindow
 
 
@@ -36,4 +39,23 @@ def time_window(
 
 PaginationDep = Annotated[Pagination, Depends(pagination)]
 TimeWindowDep = Annotated[TimeWindow, Depends(time_window)]
+
+
+@dataclass(frozen=True)
+class StatsQuery:
+    window: TimeWindow
+    data_as_of: datetime
+
+
+def stats_query(window: TimeWindowDep, db: Session = Depends(get_db)) -> StatsQuery:
+    """Shared by all statistics endpoints: whole-day window + marts must exist (ADR 0007).
+
+    FastAPI caches dependencies within one request, so `db` is the same session
+    the endpoint gets.
+    """
+    stats.require_whole_days(window)
+    return StatsQuery(window=window, data_as_of=stats.marts_built_at(db))
+
+
+StatsQueryDep = Annotated[StatsQuery, Depends(stats_query)]
 TopLimit = Annotated[int, Query(ge=1, le=100, description="How many items to return")]

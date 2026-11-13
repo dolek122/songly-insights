@@ -1,0 +1,11 @@
+# Dashboards are files in deploy/grafana/dashboards (versioned in git). Changes made in
+# the Grafana UI are not saved back: export the JSON and commit it instead.
+apiVersion: 1
+
+providers:
+  - name: songly
+    folder: Songly Insights
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

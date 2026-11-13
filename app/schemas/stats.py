@@ -36,29 +36,30 @@ class DailyPlays(BaseModel):
     plays: int
 
 
-class TopTracksResponse(BaseModel):
+class StatsResponse(BaseModel):
     window: Window
+    # Statistics come from marts, which are as fresh as the last pipeline run (ADR 0007).
+    data_as_of: datetime
+
+
+class TopTracksResponse(StatsResponse):
     items: list[TopTrack]
 
 
-class TopArtistsResponse(BaseModel):
-    window: Window
+class TopArtistsResponse(StatsResponse):
     items: list[TopArtist]
 
 
-class TopGenresResponse(BaseModel):
-    window: Window
+class TopGenresResponse(StatsResponse):
     items: list[TopGenre]
 
 
-class DailyPlaysResponse(BaseModel):
-    window: Window
+class DailyPlaysResponse(StatsResponse):
     items: list[DailyPlays]
 
 
-class ListenerSummary(BaseModel):
+class ListenerSummary(StatsResponse):
     listener_id: int
-    window: Window
     total_plays: int
     unique_tracks: int
     unique_artists: int
@@ -67,3 +68,76 @@ class ListenerSummary(BaseModel):
     last_listened_at: datetime | None
     top_artist: TopArtist | None
     top_genre: TopGenre | None
+
+
+# --- sessions (ADR 0010) --------------------------------------------------------------------
+
+
+class ListeningSession(BaseModel):
+    started_at: datetime
+    ended_at: datetime
+    duration_minutes: float
+    plays: int
+    unique_tracks: int
+    unique_artists: int
+    listening_ms: int | None  # None when no track in the session has a known length
+
+
+class ListenerSessionsResponse(StatsResponse):
+    listener_id: int
+    total: int
+    limit: int
+    offset: int
+    items: list[ListeningSession]
+
+
+class SessionStats(StatsResponse):
+    sessions: int
+    avg_plays: float | None
+    avg_duration_minutes: float | None
+    # Median: half of the sessions are shorter. Less sensitive to a few very long sessions.
+    median_duration_minutes: float | None
+    longest_duration_minutes: float | None
+
+
+# --- trends (ADR 0011) ----------------------------------------------------------------------
+
+
+class TrendItem(BaseModel):
+    id: int
+    name: str
+    plays: int
+    previous_plays: int
+    change: int
+    # None when there were no plays before (growth from 0 has no percentage).
+    change_pct: float | None
+
+
+class TrendResponse(StatsResponse):
+    # The window right before `window`, with the same length.
+    previous_window: Window
+    direction: str
+    items: list[TrendItem]
+
+
+# --- similarity (ADR 0012) ------------------------------------------------------------------
+
+
+class SharedArtist(BaseModel):
+    artist_id: int
+    name: str
+
+
+class SimilarListener(BaseModel):
+    listener_id: int
+    username: str
+    # Cosine similarity of artist play counts: 1.0 = the same taste, 0 = nothing in common.
+    similarity: float
+    shared_artists: int
+    # Artists both listen to the most: explains why they are similar.
+    top_shared_artists: list[SharedArtist]
+
+
+class SimilarListenersResponse(StatsResponse):
+    listener_id: int
+    items: list[SimilarListener]

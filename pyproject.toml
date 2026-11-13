@@ -16,17 +16,28 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
+# Stage 2 pipeline. Kept separate so the API can be installed without Prefect.
+pipeline = [
+    "prefect>=3.0",
+    "httpx>=0.27",
+]
 dev = [
+    # Tests cover the pipeline too, so dev includes it.
+    "songly-insights[pipeline]",
     "pytest>=8",
     "httpx>=0.27",
     "ruff>=0.6",
 ]
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "pipeline*"]
+
+[tool.setuptools.package-data]
+pipeline = ["sql/*.sql"]
 
 [tool.ruff]
 line-length = 100

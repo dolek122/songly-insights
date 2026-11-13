@@ -4,7 +4,9 @@ The same `seed` always produces the same data, so demos and bug reports are repr
 The data is random but shaped a little like real listening:
 * every listener has a few favourite genres and mostly plays artists from them,
 * a few artists are much more popular than the rest (weights fall off like 1/rank),
-* more plays happen in the evening than at night.
+* more plays happen in the evening than at night,
+* plays come in listening sessions of 1-12 tracks played one after another,
+* each artist slowly gains or loses popularity over the period (a trend).
 
 Generation is pure Python (no database), which makes it easy to test.
 """
@@ -91,20 +93,37 @@ def generate(
     for index, track in enumerate(track_list):
         tracks_by_artist.setdefault(track.artist_index, []).append(index)
 
+    # Trend of each artist over the whole period, from -0.8 (fading) to +0.8 (rising).
+    # It makes /stats/trending-* show something more than random noise.
+    trends = [rng.uniform(-0.8, 0.8) for _ in artist_list]
+
     events = []
     for listener_index in range(listeners):
         favourite_genres = set(rng.sample(GENRES, k=3))
         # Favourite-genre artists are 5x more likely to be played by this listener.
-        weights = [
+        base_weights = [
             popularity[i] * (5 if favourite_genres & set(a.genres) else 1)
             for i, a in enumerate(artist_list)
         ]
-        chosen = rng.choices(range(len(artist_list)), weights=weights, k=events_per_listener)
-        for artist_index in chosen:
-            track_index = rng.choice(tracks_by_artist[artist_index])
-            events.append(
-                SyntheticEvent(listener_index, track_index, _random_moment(rng, start, days))
-            )
+        listener_events: list[SyntheticEvent] = []
+        # Plays come in sessions: a few tracks in a row, each one starting when the
+        # previous one ended plus a short pause (ADR 0010).
+        while len(listener_events) < events_per_listener:
+            moment = _random_moment(rng, start, days)
+            # 0.0 at the start of the period, 1.0 at the end; the trend shifts the weights.
+            progress = (moment - start) / (end - start)
+            weights = [w * (1 + trends[i] * (2 * progress - 1)) for i, w in enumerate(base_weights)]
+            for _ in range(rng.randint(1, 12)):
+                if moment >= end or len(listener_events) == events_per_listener:
+                    break
+                artist_index = rng.choices(range(len(artist_list)), weights=weights)[0]
+                track_index = rng.choice(tracks_by_artist[artist_index])
+                listener_events.append(SyntheticEvent(listener_index, track_index, moment))
+                moment += timedelta(
+                    milliseconds=track_list[track_index].duration_ms,
+                    seconds=rng.randint(0, 120),
+                )
+        events.extend(listener_events)
 
     return SyntheticDataset(
         genres=list(GENRES),

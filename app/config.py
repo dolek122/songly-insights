@@ -1,6 +1,5 @@
-"""Application settings read from environment variables (and the optional .env file)."""
-
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,9 +9,11 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://songly:songly@localhost:5432/insights"
     test_database_url: str = "postgresql+psycopg://songly:songly@localhost:5432/insights_test"
+    musicbrainz_contact: str | None = None
+    log_format: Literal["text", "json"] = "text"
+    log_level: str = "INFO"
 
 
 @lru_cache
 def get_settings() -> Settings:
-    # Cached so the .env file is read only once per process.
     return Settings()

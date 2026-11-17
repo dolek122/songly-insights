@@ -1,0 +1,27 @@
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: discord
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="info"']
+      receiver: discord
+      repeat_interval: 24h
+
+receivers:
+  - name: discord
+    discord_configs:
+      - webhook_url_file: /run/secrets/discord_webhook_url
+        send_resolved: true
+        title: '{{ template "songly.discord.title" . }}'
+        message: '{{ template "songly.discord.message" . }}'
+
+inhibit_rules:
+  - source_matchers: ['alertname="DatabaseDown"']
+    target_matchers: ['alertname=~"MartsMissing|MartsStale|PipelineFailed|DataQualityWarnings"']
+  - source_matchers: ['alertname="ApiDown"']
+    target_matchers: ['alertname=~"DatabaseDown|HighErrorRate|SlowRequests"']

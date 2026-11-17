@@ -1,5 +1,3 @@
-"""Import and list listening events. Idempotency rules are described in ADR 0002."""
-
 from collections.abc import Sequence
 
 from sqlalchemy import func, select
@@ -13,7 +11,6 @@ from app.services.time_window import TimeWindow, to_utc
 
 
 def _check_references(session: Session, events: Sequence[ListeningEventIn]) -> None:
-    """Fail with a readable 422 instead of a foreign key error from the database."""
     listener_ids = {e.listener_id for e in events}
     track_ids = {e.track_id for e in events}
     found_listeners = set(session.scalars(select(Listener.id).where(Listener.id.in_(listener_ids))))
@@ -31,12 +28,6 @@ def _check_references(session: Session, events: Sequence[ListeningEventIn]) -> N
 
 
 def import_events(session: Session, events: Sequence[ListeningEventIn]) -> BulkImportResult:
-    """Insert events, silently skipping ones that already exist.
-
-    Idempotent: sending the same batch again inserts nothing and returns duplicates == received.
-    It relies on the unique constraint (listener_id, track_id, listened_at) and PostgreSQL's
-    INSERT ... ON CONFLICT DO NOTHING, so it is also safe when two imports run at the same time.
-    """
     _check_references(session, events)
     rows = [
         {
@@ -50,7 +41,6 @@ def import_events(session: Session, events: Sequence[ListeningEventIn]) -> BulkI
         pg_insert(ListeningEvent)
         .values(rows)
         .on_conflict_do_nothing(constraint="uq_listening_events_natural_key")
-        # RETURNING gives back only the rows that were really inserted.
         .returning(ListeningEvent.id)
     )
     inserted = len(session.scalars(stmt).all())

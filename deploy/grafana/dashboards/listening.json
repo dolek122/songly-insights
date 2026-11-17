@@ -1,0 +1,358 @@
+{
+  "uid": "songly-listening",
+  "title": "Songly – listening",
+  "description": "Listening statistics read from the marts in PostgreSQL (read-only user). See ADR 0014.",
+  "tags": [
+    "songly"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "refresh": "",
+  "panels": [
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Plays",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "songly-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT sum(plays) AS plays FROM marts.daily_listener_activity WHERE $__timeFilter(day)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "songly-postgres"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Active listeners",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "songly-postgres"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT count(DISTINCT listener_id) AS listeners FROM marts.daily_listener_activity WHERE $__timeFilter(day)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "songly-postgres"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Average session",
+      "description": "Sessions: plays with gaps of at most 30 minutes (ADR 0010).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "songly-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT avg(extract(epoch FROM ended_at - started_at)) AS seconds FROM marts.listening_sessions WHERE $__timeFilter(day)",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "songly-postgres"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Data as of",
+      "description": "When the pipeline last built the marts.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "songly-postgres"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT extract(epoch FROM built_at) * 1000 AS built_at FROM marts.build_info",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "songly-postgres"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeFromNow",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Plays per day",
+      "description": "UTC days (ADR 0003).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "songly-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT day::timestamp AT TIME ZONE 'UTC' AS time, sum(plays) AS plays FROM marts.daily_listener_activity WHERE $__timeFilter(day) GROUP BY day ORDER BY day",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "songly-postgres"
+          }
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Top genres per day",
+      "description": "The 6 most played genres in the range. A play counts towards every genre of its artist.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "songly-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT day::timestamp AT TIME ZONE 'UTC' AS time, genre_name AS metric, plays FROM marts.daily_genre_plays WHERE $__timeFilter(day) AND genre_id IN (SELECT genre_id FROM marts.daily_genre_plays WHERE $__timeFilter(day) GROUP BY genre_id ORDER BY sum(plays) DESC LIMIT 6) ORDER BY day",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "songly-postgres"
+          }
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "Top artists",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "songly-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT a.name AS artist, sum(f.plays) AS plays, count(DISTINCT f.listener_id) AS listeners FROM marts.listener_track_daily f JOIN public.artists a ON a.id = f.artist_id WHERE $__timeFilter(f.day) GROUP BY a.name ORDER BY plays DESC LIMIT 15",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "songly-postgres"
+          }
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Sessions per day",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "songly-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT day::timestamp AT TIME ZONE 'UTC' AS time, count(*) AS sessions, avg(plays) AS \"avg plays per session\" FROM marts.listening_sessions WHERE $__timeFilter(day) GROUP BY day ORDER BY day",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "songly-postgres"
+          }
+        }
+      ]
+    }
+  ]
+}

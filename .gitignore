@@ -10,3 +10,8 @@ venv/
 htmlcov/
 build/
 dist/
+
+backups/
+
+*.md
+!README.md

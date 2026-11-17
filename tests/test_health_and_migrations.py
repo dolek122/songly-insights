@@ -17,7 +17,6 @@ def test_health_ok(client):
 
 
 def test_health_reports_unreachable_database():
-    # Port 1 is never a PostgreSQL server, so connecting fails immediately.
     broken = create_engine("postgresql+psycopg://user:pass@127.0.0.1:1/none")
     app = create_app()
 
@@ -31,10 +30,6 @@ def test_health_reports_unreachable_database():
 
 
 def test_models_and_migrations_are_in_sync(engine):
-    """Fails when a model was changed without a migration (or the other way round).
-
-    Fix: alembic revision --autogenerate -m "describe the change"
-    """
     with engine.connect() as conn:
         diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)
     assert diff == [], f"Models and migrations differ: {diff}"

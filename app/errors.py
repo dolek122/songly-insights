@@ -1,12 +1,3 @@
-"""One error format for the whole API.
-
-Every error response looks like:
-    {"error": {"code": "not_found", "message": "Artist 5 not found", "details": {...}}}
-
-`code` is stable and meant for programs, `message` is meant for humans,
-`details` is optional extra data (e.g. the list of invalid fields).
-"""
-
 import logging
 from typing import Any
 
@@ -20,8 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class AppError(Exception):
-    """Base class for errors raised on purpose by our code (services and routers)."""
-
     status_code = 400
     code = "bad_request"
 
@@ -41,9 +30,12 @@ class ConflictError(AppError):
     code = "conflict"
 
 
-class UnprocessableError(AppError):
-    """Input is well-formed but breaks a business rule (e.g. `from` after `to`)."""
+class MartsNotReadyError(AppError):
+    status_code = 503
+    code = "marts_not_ready"
 
+
+class UnprocessableError(AppError):
     status_code = 422
     code = "unprocessable"
 
@@ -67,8 +59,6 @@ async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
 
 
 async def _validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
-    # FastAPI's default 422 body has a different shape; we wrap its list of problems
-    # in our format. "input"/"ctx" may hold non-JSON values, so we keep only the basics.
     details = [
         {"loc": list(err["loc"]), "msg": err["msg"], "type": err["type"]} for err in exc.errors()
     ]
@@ -79,7 +69,6 @@ async def _validation_error_handler(_: Request, exc: RequestValidationError) -> 
 
 
 async def _http_error_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
-    # Raised by the framework itself, e.g. 404 for an unknown URL or 405 for a wrong method.
     codes = {404: "not_found", 405: "method_not_allowed"}
     code = codes.get(exc.status_code, "http_error")
     return JSONResponse(
@@ -90,7 +79,6 @@ async def _http_error_handler(_: Request, exc: StarletteHTTPException) -> JSONRe
 
 
 async def _unhandled_error_handler(_: Request, exc: Exception) -> JSONResponse:
-    # Never leak internals (stack traces, SQL) to the client; log them instead.
     logger.exception("Unhandled error", exc_info=exc)
     return JSONResponse(
         status_code=500, content=error_body("internal_error", "Internal server error")

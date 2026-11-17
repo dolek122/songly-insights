@@ -3,9 +3,6 @@ from tests.conftest import assert_error
 API = "/api/v1"
 
 
-# --- genres ---------------------------------------------------------------------------------
-
-
 def test_create_and_list_genres(client):
     assert client.post(f"{API}/genres", json={"name": " Rock "}).status_code == 201
     client.post(f"{API}/genres", json={"name": "jazz"})
@@ -13,7 +10,6 @@ def test_create_and_list_genres(client):
     response = client.get(f"{API}/genres")
 
     assert response.status_code == 200
-    # Names are normalised (trimmed, lower case) and sorted.
     assert [g["name"] for g in response.json()] == ["jazz", "rock"]
 
 
@@ -24,9 +20,6 @@ def test_duplicate_genre_is_a_conflict(client):
 
 def test_empty_genre_name_is_rejected(client):
     assert_error(client.post(f"{API}/genres", json={"name": ""}), 422, "validation_error")
-
-
-# --- artists --------------------------------------------------------------------------------
 
 
 def test_create_artist_with_genres(client, factory):
@@ -106,9 +99,6 @@ def test_pagination_limits_are_validated(client):
     assert_error(client.get(f"{API}/artists", params={"offset": -1}), 422, "validation_error")
 
 
-# --- tracks ---------------------------------------------------------------------------------
-
-
 def test_create_and_get_track(client, factory):
     artist = factory.artist("Nina")
 
@@ -150,9 +140,6 @@ def test_list_tracks_filtered_by_artist(client, factory):
 
 def test_get_missing_track(client):
     assert_error(client.get(f"{API}/tracks/5"), 404, "not_found")
-
-
-# --- listeners ------------------------------------------------------------------------------
 
 
 def test_create_list_and_get_listener(client):

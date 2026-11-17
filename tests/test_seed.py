@@ -1,5 +1,7 @@
+import argparse
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
@@ -38,15 +40,32 @@ def test_loader_writes_dataset_and_is_idempotent_for_events(db):
 
 
 def test_cli_seed_refuses_to_mix_with_existing_data(engine, db, monkeypatch, capsys):
-    # Point the CLI at the test database instead of the development one.
     monkeypatch.setattr(cli, "SessionLocal", sessionmaker(bind=engine))
     args = ["seed", "--artists", "3", "--listeners", "2", "--events-per-listener", "5"]
 
     assert cli.main(args) == 0
     assert "Seeded 16 genres, 3 artists" in capsys.readouterr().out
 
-    assert cli.main(args) == 1  # data exists and --reset was not given
+    assert cli.main(args) == 1
     assert "--reset" in capsys.readouterr().err
 
     assert cli.main([*args, "--reset"]) == 0
     assert db.scalar(select(func.count()).select_from(Artist)) == 3
+
+
+def test_generator_creates_listening_sessions():
+    data = generator.generate(seed=5, **SMALL)
+    first_listener = sorted(e.listened_at for e in data.events if e.listener_index == 0)
+
+    gaps = [b - a for a, b in zip(first_listener, first_listener[1:], strict=False)]
+    within_session = [g for g in gaps if g <= timedelta(minutes=30)]
+
+    assert len(within_session) > len(gaps) / 2
+
+
+def test_cli_end_date():
+    assert cli.parse_end_date("2025-06-30") == datetime(2025, 6, 30, tzinfo=UTC)
+    now = cli.parse_end_date("today")
+    assert abs((datetime.now(UTC) - now).total_seconds()) < 5
+    with pytest.raises(argparse.ArgumentTypeError):
+        cli.parse_end_date("yesterday")

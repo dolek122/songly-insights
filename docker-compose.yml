@@ -1,21 +1,182 @@
+x-app: &app
+  image: ${SONGLY_IMAGE:-songly-insights:local}
+  build: .
+  profiles: [full]
+  environment:
+    DATABASE_URL: postgresql+psycopg://songly:${POSTGRES_PASSWORD:-songly}@db:5432/insights
+    MUSICBRAINZ_CONTACT: ${MUSICBRAINZ_CONTACT:-}
+    PREFECT_API_URL: http://prefect:4200/api
+    LOG_FORMAT: json
+    PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+
 services:
   db:
     image: postgres:16
     environment:
       POSTGRES_USER: songly
-      POSTGRES_PASSWORD: songly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-songly}
       POSTGRES_DB: insights
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Scripts in this folder run once, when the data volume is created.
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U songly -d insights"]
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  prefect:
+    <<: *app
+    command: ["prefect", "server", "start", "--host", "0.0.0.0"]
+    environment:
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+      PREFECT_UI_STATIC_DIRECTORY: /home/songly/.prefect/ui
+    ports:
+      - "127.0.0.1:4200:4200"
+    volumes:
+      - prefect:/home/songly/.prefect
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  pipeline:
+    <<: *app
+    command: ["python", "-m", "pipeline", "serve", "--cron", "${PIPELINE_CRON:-15 3 * * *}"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      prefect:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [full]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      - --web.external-url=${PROMETHEUS_EXTERNAL_URL:-http://localhost:9090}
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+      - prometheus:/prometheus
+    depends_on:
+      - alertmanager
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10
+    profiles: [full]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.localhost}
+      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN:-grafana.localhost}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - grafana
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16
+    profiles: [full]
+    entrypoint: ["bash", "/scripts/backup.sh"]
+    command: ["loop"]
+    environment:
+      PGHOST: db
+      PGUSER: songly
+      PGPASSWORD: ${POSTGRES_PASSWORD:-songly}
+      PGDATABASE: insights
+      BACKUP_TIME: ${BACKUP_TIME:-02:30}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+    volumes:
+      - ./deploy/backup:/scripts:ro
+      - ./backups:/backups
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: [full]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://localhost:9093}
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./deploy/alertmanager:/etc/alertmanager:ro
+      - alertmanager:/alertmanager
+    secrets:
+      - discord_webhook_url
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    profiles: [full]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://${GRAFANA_DOMAIN:-grafana.localhost}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-grafana}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  prefect:
+  prometheus:
+  alertmanager:
+  grafana:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  discord_webhook_url:
+    environment: DISCORD_WEBHOOK_URL

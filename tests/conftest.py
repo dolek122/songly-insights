@@ -1,11 +1,3 @@
-"""Test setup.
-
-* The test database (TEST_DATABASE_URL) is wiped once per test run and rebuilt from the real
-  Alembic migrations, so the tests also prove that the migrations work.
-* After every test all tables are truncated, so tests cannot affect each other.
-* The API under test gets its sessions from the test database via a dependency override.
-"""
-
 from collections.abc import Iterator
 from datetime import datetime
 
@@ -21,6 +13,7 @@ from app.db import get_db
 from app.main import create_app
 from app.models import Artist, Genre, Listener, ListeningEvent, Track
 from app.seed.loader import TABLES
+from pipeline import layers
 
 TEST_DATABASE_URL = get_settings().test_database_url
 
@@ -35,6 +28,7 @@ def alembic_config() -> Config:
 def engine() -> Iterator[Engine]:
     engine = create_engine(TEST_DATABASE_URL)
     with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA IF EXISTS marts, staging, raw, ops CASCADE"))
         conn.execute(text("DROP SCHEMA public CASCADE"))
         conn.execute(text("CREATE SCHEMA public"))
     command.upgrade(alembic_config(), "head")
@@ -47,21 +41,38 @@ def db(engine: Engine) -> Iterator[Session]:
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     with session_factory() as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def clean_database(engine: Engine) -> Iterator[None]:
+    yield
     with engine.begin() as conn:
-        conn.execute(text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE"))
+        tables = [
+            *TABLES,
+            "raw.musicbrainz_artist_search",
+            "raw.musicbrainz_recording_browse",
+            "raw.listenbrainz_listens",
+            "ops.pipeline_runs",
+            "ops.backups",
+        ]
+        conn.execute(text(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE"))
+        conn.execute(text("DROP SCHEMA IF EXISTS marts, staging CASCADE"))
 
 
 @pytest.fixture
 def client(db: Session) -> Iterator[TestClient]:
     app = create_app()
-    app.dependency_overrides[get_db] = lambda: db
+
+    def test_db() -> Iterator[Session]:
+        yield db
+        db.rollback()
+
+    app.dependency_overrides[get_db] = test_db
     with TestClient(app) as test_client:
         yield test_client
 
 
 class Factory:
-    """Small helpers that insert rows directly, so tests can focus on what they check."""
-
     def __init__(self, session: Session) -> None:
         self.session = session
 
@@ -76,7 +87,9 @@ class Factory:
     def artist(self, name: str = "Artist", genres: list[Genre] | None = None) -> Artist:
         return self._save(Artist(name=name, genres=genres or []))
 
-    def track(self, artist: Artist, title: str = "Track", duration_ms: int = 200_000) -> Track:
+    def track(
+        self, artist: Artist, title: str = "Track", duration_ms: int | None = 200_000
+    ) -> Track:
         return self._save(Track(title=title, artist_id=artist.id, duration_ms=duration_ms))
 
     def listener(self, username: str = "alice") -> Listener:
@@ -95,8 +108,17 @@ def factory(db: Session) -> Factory:
     return Factory(db)
 
 
+@pytest.fixture
+def build_marts(engine: Engine):
+
+    def build() -> None:
+        layers.build_staging(engine)
+        layers.build_marts(engine)
+
+    return build
+
+
 def assert_error(response, status: int, code: str) -> dict:
-    """Check the common error shape {"error": {"code", "message", "details"?}}."""
     assert response.status_code == status, response.text
     body = response.json()
     assert set(body) == {"error"}

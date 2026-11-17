@@ -1,11 +1,9 @@
-"""Alembic environment: tells Alembic which database to use and what the models look like."""
-
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-import app.models  # noqa: F401  (importing registers all tables in Base.metadata)
+import app.models  # noqa: F401
 from app.config import get_settings
 from app.db import Base
 
@@ -14,16 +12,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-# A URL passed by the caller (tests) wins; otherwise use DATABASE_URL from settings.
 if not config.get_main_option("sqlalchemy.url"):
-    # "%" must be doubled because the config file format treats it as a special character.
     config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """Generate SQL without connecting (`alembic upgrade head --sql`)."""
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,

@@ -30,8 +30,6 @@ class ArtistOut(OrmModel):
 
 
 class ArtistRef(OrmModel):
-    """Short artist representation embedded in other objects."""
-
     id: int
     name: str
 
@@ -46,7 +44,7 @@ class TrackCreate(BaseModel):
 class TrackOut(OrmModel):
     id: int
     title: str
-    duration_ms: int
+    duration_ms: int | None
     mbid: UUID | None
     artist: ArtistRef
     created_at: datetime
@@ -61,4 +59,5 @@ class ListenerOut(OrmModel):
     id: int
     username: str
     country: str | None
+    listenbrainz_user: str | None
     created_at: datetime

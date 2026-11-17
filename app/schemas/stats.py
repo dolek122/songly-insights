@@ -4,9 +4,6 @@ from pydantic import BaseModel, Field
 
 
 class Window(BaseModel):
-    """Echo of the time window used, so the client sees how its input was interpreted."""
-
-    # `from` is a Python keyword, so the field is called from_ and renamed in JSON.
     from_: datetime | None = Field(serialization_alias="from")
     to: datetime | None
 
@@ -36,29 +33,29 @@ class DailyPlays(BaseModel):
     plays: int
 
 
-class TopTracksResponse(BaseModel):
+class StatsResponse(BaseModel):
     window: Window
+    data_as_of: datetime
+
+
+class TopTracksResponse(StatsResponse):
     items: list[TopTrack]
 
 
-class TopArtistsResponse(BaseModel):
-    window: Window
+class TopArtistsResponse(StatsResponse):
     items: list[TopArtist]
 
 
-class TopGenresResponse(BaseModel):
-    window: Window
+class TopGenresResponse(StatsResponse):
     items: list[TopGenre]
 
 
-class DailyPlaysResponse(BaseModel):
-    window: Window
+class DailyPlaysResponse(StatsResponse):
     items: list[DailyPlays]
 
 
-class ListenerSummary(BaseModel):
+class ListenerSummary(StatsResponse):
     listener_id: int
-    window: Window
     total_plays: int
     unique_tracks: int
     unique_artists: int
@@ -67,3 +64,62 @@ class ListenerSummary(BaseModel):
     last_listened_at: datetime | None
     top_artist: TopArtist | None
     top_genre: TopGenre | None
+
+
+class ListeningSession(BaseModel):
+    started_at: datetime
+    ended_at: datetime
+    duration_minutes: float
+    plays: int
+    unique_tracks: int
+    unique_artists: int
+    listening_ms: int | None
+
+
+class ListenerSessionsResponse(StatsResponse):
+    listener_id: int
+    total: int
+    limit: int
+    offset: int
+    items: list[ListeningSession]
+
+
+class SessionStats(StatsResponse):
+    sessions: int
+    avg_plays: float | None
+    avg_duration_minutes: float | None
+    median_duration_minutes: float | None
+    longest_duration_minutes: float | None
+
+
+class TrendItem(BaseModel):
+    id: int
+    name: str
+    plays: int
+    previous_plays: int
+    change: int
+    change_pct: float | None
+
+
+class TrendResponse(StatsResponse):
+    previous_window: Window
+    direction: str
+    items: list[TrendItem]
+
+
+class SharedArtist(BaseModel):
+    artist_id: int
+    name: str
+
+
+class SimilarListener(BaseModel):
+    listener_id: int
+    username: str
+    similarity: float
+    shared_artists: int
+    top_shared_artists: list[SharedArtist]
+
+
+class SimilarListenersResponse(StatsResponse):
+    listener_id: int
+    items: list[SimilarListener]

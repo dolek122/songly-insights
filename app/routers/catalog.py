@@ -1,5 +1,3 @@
-"""Artists, tracks and genres. Routers only translate HTTP <-> service calls."""
-
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 

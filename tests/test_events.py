@@ -40,7 +40,6 @@ def test_bulk_import_is_idempotent(client, factory, db):
 def test_duplicates_inside_one_batch_are_counted_once(client, factory):
     alice, track = factory.listener(), factory.track(factory.artist())
     same = event(alice, track, "2026-01-01T10:00:00Z")
-    # The same moment written in another time zone is the same event.
     same_other_zone = event(alice, track, "2026-01-01T12:00:00+02:00")
 
     response = client.post(f"{URL}/bulk", json={"events": [same, same, same_other_zone]})
@@ -89,7 +88,6 @@ def test_import_rejects_unknown_references(client, factory, db):
     error = assert_error(response, 422, "unknown_reference")
 
     assert error["details"] == {"listener_ids": [42], "track_ids": [999]}
-    # Nothing is imported when one event is invalid (all or nothing).
     assert db.scalar(select(func.count()).select_from(ListeningEvent)) == 0
 
 
@@ -106,9 +104,9 @@ def test_list_events_uses_half_open_window(client, factory):
     factory.plays(
         alice,
         track,
-        datetime(2026, 1, 1, tzinfo=UTC),  # exactly `from`: included
+        datetime(2026, 1, 1, tzinfo=UTC),
         datetime(2026, 1, 1, 12, tzinfo=UTC),
-        datetime(2026, 1, 2, tzinfo=UTC),  # exactly `to`: excluded
+        datetime(2026, 1, 2, tzinfo=UTC),
     )
     factory.plays(bob, track, datetime(2026, 1, 1, 6, tzinfo=UTC))
 

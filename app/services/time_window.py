@@ -1,11 +1,3 @@
-"""Time window used by all statistics. Rules are described in ADR 0003.
-
-* The window is half-open: `from` is inclusive, `to` is exclusive.
-  Thanks to that, consecutive windows (Jan 1-Feb 1, Feb 1-Mar 1) never count a play twice.
-* Both ends are optional; a missing end means "unbounded".
-* Everything is in UTC. A timestamp without a time zone is treated as UTC.
-"""
-
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -38,7 +30,6 @@ class TimeWindow:
         return cls(from_=from_, to=to)
 
     def filter(self, column) -> ColumnElement[bool]:
-        """SQL condition `from <= column < to` (skipping the ends that are not set)."""
         conditions = []
         if self.from_ is not None:
             conditions.append(column >= self.from_)

@@ -6,7 +6,7 @@ syntetycznych, z MusicBrainz i opcjonalnie z ListenBrainz.
 
 Stack: FastAPI, SQLAlchemy 2.0, PostgreSQL 16, Alembic, Prefect, Docker, Prometheus, Grafana.
 
-![Dashboard w Grafanie](docs/img/grafana-listening.png)
+![Frontend Songly Insights](docs/img/frontend.png)
 
 ## Uruchomienie lokalnie
 
@@ -22,6 +22,10 @@ python -m app.cli seed --reset
 python -m pipeline run
 uvicorn app.main:app --reload
 ```
+
+Pod <http://localhost:8000> jest prosty frontend: przegląd statystyk, lista słuchaczy
+(z sesjami i podobnymi słuchaczami) i katalog artystów. Okres wybiera się w prawym górnym rogu.
+To zwykły HTML i JavaScript w `app/web`, bez kroku budowania – strona korzysta z tego samego API.
 
 Dokumentacja API jest pod <http://localhost:8000/docs>. Kilka przykładów:
 
@@ -43,8 +47,11 @@ go uruchomić ponownie (`python -m pipeline run`).
   Po każdym kroku sprawdza jakość danych.
 - **Analityka** – sesje słuchania (przerwa dłuższa niż 30 minut kończy sesję), trendy
   (porównanie z poprzednim okresem) i podobieństwo słuchaczy (podobieństwo kosinusowe).
+- **Frontend** – strony do przeklikania danych, serwowane przez FastAPI pod `/app`.
 - **Wdrożenie** – cały system w Docker Compose, HTTPS przez Caddy, metryki w Prometheusie,
   dashboardy w Grafanie, alerty na Discorda i codzienne kopie zapasowe bazy.
+
+![Dashboard w Grafanie](docs/img/grafana-listening.png)
 
 ## Import prawdziwych danych
 

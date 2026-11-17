@@ -5,6 +5,7 @@ from app.db import get_db
 from app.routers.deps import StatsQueryDep, TopLimit
 from app.schemas.stats import (
     DailyPlaysResponse,
+    DataRange,
     SessionStats,
     TopArtistsResponse,
     TopGenresResponse,
@@ -16,6 +17,13 @@ from app.services import sessions, stats, trends
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 ListenerFilter = Query(None, description="Only plays of this listener")
+
+
+@router.get("/data-range", response_model=DataRange)
+def data_range(db: Session = Depends(get_db)):
+    data_as_of = stats.marts_built_at(db)
+    first_day, last_day = stats.data_range(db)
+    return DataRange(first_day=first_day, last_day=last_day, data_as_of=data_as_of)
 
 
 @router.get("/top-tracks", response_model=TopTracksResponse)

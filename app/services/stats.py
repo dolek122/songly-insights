@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import BigInteger, Select, Table, cast, func, select, text
 from sqlalchemy.orm import Session
@@ -34,6 +34,13 @@ def marts_built_at(session: Session) -> datetime:
             "Statistics are not available yet. Run the pipeline: python -m pipeline run"
         )
     return session.scalar(select(build_info.c.built_at))
+
+
+def data_range(session: Session) -> tuple[date | None, date | None]:
+    first_day, last_day = session.execute(
+        select(func.min(facts.c.day), func.max(facts.c.day))
+    ).one()
+    return first_day, last_day
 
 
 def filter_days(

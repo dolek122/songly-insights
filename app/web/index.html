@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Songly Insights</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="vendor/chart.umd.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">Songly Insights</a>
+    <nav>
+      <a href="#/" data-nav="overview">Przegląd</a>
+      <a href="#/listeners" data-nav="listeners">Słuchacze</a>
+      <a href="#/artists" data-nav="artists">Artyści</a>
+      <a href="/docs" target="_blank" rel="noopener">API</a>
+    </nav>
+    <label class="window-picker">
+      Okres
+      <select id="window">
+        <option value="7">ostatnie 7 dni</option>
+        <option value="30" selected>ostatnie 30 dni</option>
+        <option value="90">ostatnie 90 dni</option>
+        <option value="all">całość</option>
+      </select>
+    </label>
+  </header>
+  <main id="view"></main>
+  <footer id="footer"></footer>
+</body>
+</html>

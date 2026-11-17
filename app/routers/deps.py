@@ -1,5 +1,3 @@
-"""Query parameters shared by many endpoints, written once as FastAPI dependencies."""
-
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated
@@ -26,7 +24,6 @@ def pagination(
 
 
 def time_window(
-    # `from` is a Python keyword, so the argument is from_ and `alias` sets the URL name.
     from_: datetime | None = Query(
         None, alias="from", description="Inclusive start. Without a time zone it means UTC."
     ),
@@ -48,11 +45,6 @@ class StatsQuery:
 
 
 def stats_query(window: TimeWindowDep, db: Session = Depends(get_db)) -> StatsQuery:
-    """Shared by all statistics endpoints: whole-day window + marts must exist (ADR 0007).
-
-    FastAPI caches dependencies within one request, so `db` is the same session
-    the endpoint gets.
-    """
     stats.require_whole_days(window)
     return StatsQuery(window=window, data_as_of=stats.marts_built_at(db))
 

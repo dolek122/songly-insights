@@ -1,11 +1,3 @@
-"""MusicBrainz ingestion: search artists by tag, land responses in raw, publish to the catalog.
-
-API docs: https://musicbrainz.org/doc/MusicBrainz_API
-Rules we follow (otherwise MusicBrainz blocks the client):
-* at most 1 request per second,
-* a User-Agent that names the application and a way to contact its author.
-"""
-
 import json
 import logging
 import time
@@ -20,7 +12,7 @@ from pipeline.http import RateLimiter, make_user_agent, send_json
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://musicbrainz.org/ws/2"
-MAX_PAGE_SIZE = 100  # the API's own limit for `limit`
+MAX_PAGE_SIZE = 100
 
 
 def normalize_tag(tag: str) -> str:
@@ -28,8 +20,6 @@ def normalize_tag(tag: str) -> str:
 
 
 class MusicBrainzClient:
-    """Thin wrapper over httpx that respects the rate limit (pipeline/http.py)."""
-
     def __init__(
         self,
         http: httpx.Client,
@@ -50,12 +40,10 @@ class MusicBrainzClient:
         return cls(http)
 
     def artist_search_request(self, tag: str, limit: int, offset: int) -> httpx.Request:
-        # Quotes make a multi-word tag ("hip hop") one search term.
         params = {"query": f'tag:"{tag}"', "limit": limit, "offset": offset, "fmt": "json"}
         return self.http.build_request("GET", "/artist", params=params)
 
     def recording_browse_request(self, artist_mbid: str, limit: int, offset: int) -> httpx.Request:
-        # "Browse" lists entities linked to another one (here: recordings of an artist).
         params = {"artist": artist_mbid, "limit": limit, "offset": offset, "fmt": "json"}
         return self.http.build_request("GET", "/recording", params=params)
 
@@ -78,15 +66,6 @@ def _fetch_page(
     max_age_days: int,
     result: ExtractResult,
 ) -> dict:
-    """Return one page of results, from the raw table if it is fresh, else from the API.
-
-    raw is append-only: we never update or delete there. A page downloaded less than
-    `max_age_days` ago is not downloaded again (raw doubles as a cache), which keeps
-    reruns fast and polite to MusicBrainz.
-
-    `table` and the keys of `columns` come from this module, never from user input,
-    so putting them into the SQL text is safe; all values are bound parameters.
-    """
     url = str(request.url)
     cached = text(
         f"""
@@ -123,7 +102,6 @@ def extract_artists_by_tag(
     run_id: str,
     max_age_days: int = 30,
 ) -> ExtractResult:
-    """Download artist search pages for each tag into raw.musicbrainz_artist_search."""
     result = ExtractResult()
     page_size = min(MAX_PAGE_SIZE, artists_per_tag)
     for tag in sorted({normalize_tag(t) for t in tags}):
@@ -140,7 +118,7 @@ def extract_artists_by_tag(
             artists_on_page = len(payload.get("artists", []))
             logger.info("MusicBrainz tag=%r offset=%d: %d artists", tag, offset, artists_on_page)
             if artists_on_page < page_size:
-                break  # last page: no more artists with this tag
+                break
     return result
 
 
@@ -151,12 +129,6 @@ def extract_recordings(
     run_id: str,
     max_age_days: int = 30,
 ) -> ExtractResult:
-    """Download recordings of every artist in staging.musicbrainz_artists into raw.
-
-    Needs the staging views to exist (they read raw live, so artists downloaded
-    a moment ago are already visible). One artist with 25 recordings = 1 request,
-    i.e. about 1 second because of the rate limit.
-    """
     with engine.connect() as conn:
         artist_mbids = list(
             conn.execute(
@@ -177,7 +149,7 @@ def extract_recordings(
                 result=result,
             )
             if len(payload.get("recordings", [])) < page_size:
-                break  # the artist has no more recordings
+                break
     logger.info("MusicBrainz recordings of %d artists: %s", len(artist_mbids), result)
     return result
 
@@ -190,21 +162,9 @@ class PublishResult:
 
 
 def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
-    """Copy MusicBrainz artists from staging into the API catalog (schema public).
-
-    * every searched tag becomes a genre (if it does not exist yet),
-    * artists are matched by mbid: new ones are inserted, known ones get the current name,
-    * an artist is linked to every existing genre that matches one of its tags with
-      a positive vote count,
-    * recordings become tracks (matched by mbid); videos are skipped, recordings without
-      a length get an unknown (NULL) duration (ADR 0009).
-    Running it twice changes nothing (ON CONFLICT), so it is safe to retry.
-    Requires the staging layer to be built first.
-    """
     genre_names = sorted({normalize_tag(t) for t in tags})
     with engine.begin() as conn:
         conn.execute(
-            # unnest() turns the array into rows; the CAST tells PostgreSQL its element type.
             text(
                 "INSERT INTO public.genres (name) "
                 "SELECT unnest(CAST(:names AS text[])) ON CONFLICT DO NOTHING"
@@ -215,7 +175,6 @@ def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
             text(
                 """
                 INSERT INTO public.artists (name, mbid)
-                -- left(): MusicBrainz names can be longer than our column (varchar 200).
                 SELECT left(artist_name, 200), mbid FROM staging.musicbrainz_artists
                 ON CONFLICT (mbid) DO UPDATE SET name = EXCLUDED.name
                 """
@@ -238,13 +197,10 @@ def publish_to_catalog(engine: Engine, tags: list[str]) -> PublishResult:
             text(
                 """
                 INSERT INTO public.tracks (title, artist_id, duration_ms, mbid)
-                -- NULLIF: a length of 0 means "unknown" too (the column must be > 0).
                 SELECT left(r.title, 300), a.id, nullif(r.length_ms, 0), r.recording_mbid
                 FROM staging.musicbrainz_recordings AS r
                 JOIN public.artists AS a ON a.mbid = r.artist_mbid
                 WHERE NOT r.is_video
-                -- A known track gets the current title and length (an unknown length does
-                -- not erase a known one), but keeps its artist.
                 ON CONFLICT (mbid) DO UPDATE SET
                     title = EXCLUDED.title,
                     duration_ms = coalesce(EXCLUDED.duration_ms, tracks.duration_ms)

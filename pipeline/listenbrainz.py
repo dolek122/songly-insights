@@ -1,10 +1,3 @@
-"""ListenBrainz ingestion: download a user's listens into raw, publish them as listening events.
-
-API docs: https://listenbrainz.readthedocs.io/en/latest/users/api/core.html
-Listens on ListenBrainz are public, but they are personal data: import only your own
-account or accounts whose owners agreed (ADR 0009).
-"""
-
 import json
 import logging
 import time
@@ -20,7 +13,7 @@ from pipeline.http import RateLimiter, make_user_agent, send_json
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.listenbrainz.org/1"
-MAX_PAGE_SIZE = 1000  # the API's own limit for `count`
+MAX_PAGE_SIZE = 1000
 
 
 class ListenBrainzClient:
@@ -44,11 +37,9 @@ class ListenBrainzClient:
         return cls(http)
 
     def listens_request(self, user: str, count: int, max_ts: int | None) -> httpx.Request:
-        """Newest listens of `user`; with `max_ts` only listens strictly older than it."""
         params: dict = {"count": count}
         if max_ts is not None:
             params["max_ts"] = max_ts
-        # quote(): user names may contain characters that are not allowed in a URL path.
         path = f"/user/{quote(user, safe='')}/listens"
         return self.http.build_request("GET", path, params=params)
 
@@ -86,15 +77,6 @@ def extract_listens(
     run_id: str,
     page_size: int = 100,
 ) -> ListensResult:
-    """Download listens into raw.listenbrainz_listens, newest first, going back in time.
-
-    Incremental load: the newest listen we already have for a user is the "watermark".
-    We page backwards (max_ts = oldest listen of the previous page) and stop as soon as
-    a page reaches the watermark, so a rerun downloads only new listens. A page may
-    overlap with known listens; staging removes such duplicates.
-
-    Needs the staging views (the watermark is read from staging.listenbrainz_listens).
-    """
     result = ListensResult()
     page_size = min(page_size, MAX_PAGE_SIZE)
     for user in sorted({u.strip() for u in users if u.strip()}):
@@ -122,12 +104,10 @@ def extract_listens(
             result.listens_downloaded += len(listens)
             fetched += len(listens)
             if not listens:
-                break  # no older listens
+                break
             oldest = min(listen["listened_at"] for listen in listens)
             if watermark is not None and oldest <= watermark:
-                break  # reached listens we already have
-            # max_ts is exclusive, so listens in the very same second as `oldest` but
-            # cut off by `count` would be skipped. Rare; accepted (ADR 0009).
+                break
             max_ts = oldest
         logger.info("ListenBrainz %s: %d listens (watermark %s)", user, fetched, watermark)
     return result
@@ -142,17 +122,6 @@ class PublishListensResult:
 
 
 def publish_listens(engine: Engine) -> PublishListensResult:
-    """Turn staged ListenBrainz listens into listeners, artists, tracks and listening events.
-
-    * every ListenBrainz user becomes a listener (username "lb_<name>"),
-    * a listen is matched to a track by the recording mbid; a recording that is not in the
-      catalog yet is created from the listen's own metadata (with its first artist),
-      MusicBrainz data already in the catalog is never overwritten (DO NOTHING),
-    * listens without a recording mbid cannot be matched and are skipped (a DQ warning
-      counts them), listens from the future are skipped too (broken client clocks),
-    * events use the same natural key as the API import (ADR 0002), so reruns add nothing.
-    Requires the staging layer to be built first.
-    """
     with engine.begin() as conn:
         listeners = conn.execute(
             text(
@@ -160,7 +129,6 @@ def publish_listens(engine: Engine) -> PublishListensResult:
                 INSERT INTO public.listeners (username, listenbrainz_user)
                 SELECT DISTINCT left('lb_' || user_name, 50), user_name
                 FROM staging.listenbrainz_listens
-                -- No conflict target: also skips a username that is already taken.
                 ON CONFLICT DO NOTHING
                 """
             )
@@ -169,7 +137,6 @@ def publish_listens(engine: Engine) -> PublishListensResult:
             text(
                 """
                 INSERT INTO public.artists (name, mbid)
-                -- DISTINCT ON keeps one row per artist: the name from the newest listen.
                 SELECT DISTINCT ON (artist_mbid) left(artist_name, 200), artist_mbid
                 FROM staging.listenbrainz_listens
                 WHERE recording_mbid IS NOT NULL AND artist_mbid IS NOT NULL
@@ -187,8 +154,6 @@ def publish_listens(engine: Engine) -> PublishListensResult:
                 FROM staging.listenbrainz_listens AS l
                 JOIN public.artists AS a ON a.mbid = l.artist_mbid
                 WHERE l.recording_mbid IS NOT NULL
-                -- One row per recording: prefer a listen that knows the length
-                -- (false sorts before true), then the newest one.
                 ORDER BY l.recording_mbid, l.duration_ms IS NULL, l.listened_at DESC
                 ON CONFLICT (mbid) DO NOTHING
                 """

@@ -1,5 +1,3 @@
-"""End-to-end test of the Prefect flow. Slower than the others (Prefect starts a local server)."""
-
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -23,7 +21,6 @@ from tests.pipeline_helpers import (
 
 @pytest.fixture(scope="module", autouse=True)
 def prefect_server():
-    # One temporary Prefect server (with its own throwaway database) for this module.
     with prefect_test_harness():
         yield
 
@@ -71,7 +68,6 @@ def test_flow_stops_on_failed_quality_check(db, factory):
     with pytest.raises(DataQualityError):
         flows.songly_pipeline()
 
-    # The source check failed first, so the marts were never built.
     assert db.execute(text("SELECT to_regclass('marts.artist_popularity')")).scalar() is None
 
 
@@ -85,7 +81,6 @@ def test_flow_imports_listenbrainz_listens_into_statistics(client, monkeypatch):
 
     flows.songly_pipeline(listenbrainz_users=["ana"])
 
-    # The listens went raw -> staging -> listening events -> marts -> API statistics.
     body = client.get("/api/v1/stats/top-tracks", params={"from": "2026-01-01"}).json()
     assert [(t["title"], t["plays"]) for t in body["items"]] == [("So What", 3)]
 

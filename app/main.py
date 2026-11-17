@@ -1,5 +1,3 @@
-"""FastAPI application: wires routers and error handlers together."""
-
 from fastapi import FastAPI
 
 from app.config import get_settings

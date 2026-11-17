@@ -35,7 +35,6 @@ jobs:
       - run: ruff format --check .
       - run: pytest
 
-  # Prometheus and Alertmanager configuration, unit tests of the alert rules (ADR 0014, 0015).
   alerts:
     runs-on: ubuntu-latest
     steps:
@@ -54,8 +53,6 @@ jobs:
             -v "$PWD/deploy/alertmanager:/etc/alertmanager" prom/alertmanager:v0.28.1 \
             check-config /etc/alertmanager/alertmanager.yml
 
-  # Builds the Docker image on every push; publishes it to GitHub Container Registry
-  # (ghcr.io/<owner>/<repo>) only from the default branch (ADR 0013).
   image:
     needs: [quality, alerts]
     runs-on: ubuntu-latest
@@ -79,7 +76,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-          # "sha-1a2b3c4" for every build, "latest" for the default branch.
           tags: |
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
@@ -89,6 +85,5 @@ jobs:
           push: ${{ env.PUBLISH == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Reuse layers between builds (the dependency layer rarely changes).
           cache-from: type=gha
           cache-to: type=gha,mode=max

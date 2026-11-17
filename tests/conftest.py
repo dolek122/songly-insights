@@ -1,12 +1,3 @@
-"""Test setup.
-
-* The test database (TEST_DATABASE_URL) is wiped once per test run and rebuilt from the real
-  Alembic migrations, so the tests also prove that the migrations work.
-* After every test all tables are truncated and the derived schemas dropped,
-  so tests cannot affect each other.
-* The API under test gets its sessions from the test database via a dependency override.
-"""
-
 from collections.abc import Iterator
 from datetime import datetime
 
@@ -37,7 +28,6 @@ def alembic_config() -> Config:
 def engine() -> Iterator[Engine]:
     engine = create_engine(TEST_DATABASE_URL)
     with engine.begin() as conn:
-        # Pipeline schemas first: staging views depend on tables in public.
         conn.execute(text("DROP SCHEMA IF EXISTS marts, staging, raw, ops CASCADE"))
         conn.execute(text("DROP SCHEMA public CASCADE"))
         conn.execute(text("CREATE SCHEMA public"))
@@ -55,7 +45,6 @@ def db(engine: Engine) -> Iterator[Session]:
 
 @pytest.fixture(autouse=True)
 def clean_database(engine: Engine) -> Iterator[None]:
-    """Runs after EVERY test (autouse), also tests that use `engine` without `db`."""
     yield
     with engine.begin() as conn:
         tables = [
@@ -67,7 +56,6 @@ def clean_database(engine: Engine) -> Iterator[None]:
             "ops.backups",
         ]
         conn.execute(text(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE"))
-        # staging and marts are fully derived; the pipeline creates them again when needed.
         conn.execute(text("DROP SCHEMA IF EXISTS marts, staging CASCADE"))
 
 
@@ -77,8 +65,6 @@ def client(db: Session) -> Iterator[TestClient]:
 
     def test_db() -> Iterator[Session]:
         yield db
-        # A real request closes its session; that ends its transaction and releases its
-        # locks. Without this, a read of the marts would block the next pipeline rebuild.
         db.rollback()
 
     app.dependency_overrides[get_db] = test_db
@@ -87,8 +73,6 @@ def client(db: Session) -> Iterator[TestClient]:
 
 
 class Factory:
-    """Small helpers that insert rows directly, so tests can focus on what they check."""
-
     def __init__(self, session: Session) -> None:
         self.session = session
 
@@ -126,7 +110,6 @@ def factory(db: Session) -> Factory:
 
 @pytest.fixture
 def build_marts(engine: Engine):
-    """Run the pipeline's SQL (staging + marts). Statistics endpoints read the marts."""
 
     def build() -> None:
         layers.build_staging(engine)
@@ -136,7 +119,6 @@ def build_marts(engine: Engine):
 
 
 def assert_error(response, status: int, code: str) -> dict:
-    """Check the common error shape {"error": {"code", "message", "details"?}}."""
     assert response.status_code == status, response.text
     body = response.json()
     assert set(body) == {"error"}

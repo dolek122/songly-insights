@@ -1,6 +1,4 @@
 #!/bin/bash
-# Read-only database user for Grafana dashboards (ADR 0014). Runs once, when the
-# data volume is created. The password comes from GRAFANA_DB_PASSWORD (.env).
 set -euo pipefail
 
 if [ -z "${GRAFANA_DB_PASSWORD:-}" ]; then

@@ -13,13 +13,11 @@ def at(day: int, hour: int = 12, month: int = 1) -> datetime:
 
 @pytest.fixture
 def empty_marts(build_marts):
-    """Marts built from an empty database: statistics work and return nothing."""
     build_marts()
 
 
 @pytest.fixture
 def library(factory, build_marts):
-    """Two listeners, three artists. Bowie has two genres, Miles one, Silent none."""
     rock, jazz = factory.genre("rock"), factory.genre("jazz")
     bowie = factory.artist("Bowie", genres=[rock, jazz])
     miles = factory.artist("Miles", genres=[jazz])
@@ -40,16 +38,13 @@ def library(factory, build_marts):
     return {"tracks": tracks, "alice": alice, "bob": bob, "rock": rock, "jazz": jazz}
 
 
-# --- top lists ------------------------------------------------------------------------------
-
-
 def test_top_tracks(client, library):
     body = client.get(f"{API}/stats/top-tracks").json()
 
     assert body["window"] == {"from": None, "to": None}
     assert [(t["title"], t["plays"]) for t in body["items"]] == [
         ("Heroes", 3),
-        ("So What", 3),  # same count as Heroes: the lower track id wins
+        ("So What", 3),
         ("Starman", 1),
         ("Quiet", 1),
     ]
@@ -69,13 +64,10 @@ def test_top_artists_for_one_listener(client, library):
 def test_play_counts_towards_every_genre_of_the_artist(client, library):
     body = client.get(f"{API}/stats/top-genres").json()
 
-    # jazz: 4 Bowie plays + 3 Miles plays; rock: 4 Bowie plays.
-    # Silent has no genre, so its play is not counted anywhere.
     assert [(g["name"], g["plays"]) for g in body["items"]] == [("jazz", 7), ("rock", 4)]
 
 
 def test_window_is_half_open(client, library):
-    # Day 2 is included (`from`), day 3 is excluded (`to`).
     params = {"from": "2026-01-02", "to": "2026-01-03"}
     body = client.get(f"{API}/stats/top-tracks", params=params).json()
     assert [(t["title"], t["plays"]) for t in body["items"]] == [("Heroes", 1), ("So What", 1)]
@@ -115,11 +107,8 @@ def test_top_lists_are_empty_without_data(client, empty_marts):
     assert client.get(f"{API}/stats/top-genres").json()["items"] == []
 
 
-# --- daily ----------------------------------------------------------------------------------
-
-
 def test_daily_fills_days_without_plays(client, library):
-    params = {"from": "2026-01-03", "to": "2026-01-07"}  # 3rd, 4th, 5th, 6th
+    params = {"from": "2026-01-03", "to": "2026-01-07"}
     body = client.get(f"{API}/stats/daily", params=params).json()
     assert body["items"] == [
         {"day": "2026-01-03", "plays": 1},
@@ -131,7 +120,6 @@ def test_daily_fills_days_without_plays(client, library):
 
 def test_daily_groups_by_utc_day(client, factory, build_marts):
     alice, track = factory.listener(), factory.track(factory.artist())
-    # 23:30 at UTC-02:00 on Jan 1 is 01:30 UTC on Jan 2.
     factory.plays(alice, track, datetime.fromisoformat("2026-01-01T23:30:00-02:00"))
     build_marts()
 
@@ -163,9 +151,6 @@ def test_daily_range_is_limited(client, empty_marts):
     assert_error(too_long, 422, "invalid_time_window")
 
 
-# --- listener summary -----------------------------------------------------------------------
-
-
 def test_listener_summary(client, library):
     alice = library["alice"]
 
@@ -189,7 +174,7 @@ def test_listener_summary_in_window(client, library):
 
     assert body["total_plays"] == 1
     assert body["top_artist"]["name"] == "Silent"
-    assert body["top_genre"] is None  # Silent has no genres
+    assert body["top_genre"] is None
 
 
 def test_listener_summary_without_plays(client, factory, build_marts):
@@ -208,15 +193,11 @@ def test_listener_summary_for_missing_listener(client, empty_marts):
     assert_error(client.get(f"{API}/listeners/77/summary"), 404, "not_found")
 
 
-# --- reading from marts (ADR 0007) ----------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "params",
     [
         {"from": "2026-01-01T12:00:00Z"},
         {"to": "2026-01-02T00:00:01"},
-        # Midnight in Warsaw is 23:00 UTC on the previous day: not a whole UTC day.
         {"from": "2026-01-01T00:00:00+01:00"},
     ],
 )
@@ -245,13 +226,11 @@ def test_statistics_are_as_fresh_as_the_last_pipeline_run(client, factory, libra
     before = client.get(f"{API}/stats/top-artists").json()
     factory.plays(library["bob"], library["tracks"]["quiet"], at(6), at(7))
 
-    # New plays are not visible until the pipeline runs again ...
     assert client.get(f"{API}/stats/top-artists").json() == before
 
     build_marts()
     after = client.get(f"{API}/stats/top-artists").json()
 
-    # ... and then they are, with a newer data_as_of.
     assert ("Silent", 3) in [(a["name"], a["plays"]) for a in after["items"]]
     assert after["data_as_of"] > before["data_as_of"]
 
@@ -267,4 +246,4 @@ def test_unknown_track_length_counts_as_play_but_not_as_time(client, factory, bu
     body = client.get(f"{API}/listeners/{alice.id}/summary").json()
 
     assert body["total_plays"] == 3
-    assert body["total_listening_ms"] == 100_000  # only plays with a known length
+    assert body["total_listening_ms"] == 100_000

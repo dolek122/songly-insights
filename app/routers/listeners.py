@@ -29,7 +29,6 @@ def create_listener(data: ListenerCreate, db: Session = Depends(get_db)):
 
 @router.get("/{listener_id}/summary", response_model=ListenerSummary)
 def listener_summary(listener_id: int, query: StatsQueryDep, db: Session = Depends(get_db)):
-    """Read from marts, like /stats: whole UTC days, data as of the last pipeline run."""
     return stats.listener_summary(db, listener_id, query.window, query.data_as_of)
 
 
@@ -37,7 +36,6 @@ def listener_summary(listener_id: int, query: StatsQueryDep, db: Session = Depen
 def listener_sessions(
     listener_id: int, query: StatsQueryDep, page: PaginationDep, db: Session = Depends(get_db)
 ):
-    """Listening sessions of one listener, newest first (ADR 0010)."""
     items, total = sessions.list_sessions(db, listener_id, query.window, page.limit, page.offset)
     return ListenerSessionsResponse(
         listener_id=listener_id,
@@ -54,7 +52,6 @@ def listener_sessions(
 def similar_listeners(
     listener_id: int, query: StatsQueryDep, limit: TopLimit = 10, db: Session = Depends(get_db)
 ):
-    """Listeners with the most similar taste (cosine similarity of artist plays, ADR 0012)."""
     items = similarity.similar_listeners(db, listener_id, query.window, limit)
     return SimilarListenersResponse(
         listener_id=listener_id,

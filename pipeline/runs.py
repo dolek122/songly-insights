@@ -1,13 +1,5 @@
-"""History of pipeline runs in ops.pipeline_runs (ADR 0014).
-
-Monitoring reads the newest row: did the last run succeed, when was the last success,
-how many data quality checks failed. Writes happen in their own short transactions,
-so a failed run is recorded even though its own changes were rolled back.
-"""
-
 from sqlalchemy import Engine, text
 
-# Long error messages (stack traces) are cut: the full text is in the Prefect logs.
 MAX_ERROR_LENGTH = 2000
 
 

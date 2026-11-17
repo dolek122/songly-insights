@@ -1,9 +1,3 @@
-"""Usage:
-python -m pipeline run                               # API data only
-python -m pipeline run --musicbrainz-tag jazz --musicbrainz-tag rock
-python -m pipeline serve --cron "15 3 * * *"         # run on a schedule
-"""
-
 import argparse
 
 from pipeline.flows import songly_pipeline
@@ -52,7 +46,6 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "run":
         songly_pipeline(**params)
     else:
-        # Keeps running and starts the flow according to the cron schedule.
         songly_pipeline.serve(name="daily", cron=args.cron, parameters=params)
 
 

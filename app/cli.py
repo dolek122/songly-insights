@@ -1,5 +1,3 @@
-"""Command line tools. Usage: python -m app.cli seed --reset"""
-
 import argparse
 import sys
 from datetime import UTC, date, datetime, time
@@ -48,11 +46,6 @@ DEFAULT_END = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def parse_end_date(value: str) -> datetime:
-    """'today' = up to this moment, so dashboards showing "last 90 days" have data.
-
-    Not midnight of tomorrow: plays later today would be in the future, and the
-    pipeline's source check (listening_events_not_in_future) would stop the run.
-    """
     if value == "today":
         return datetime.now(UTC).replace(microsecond=0)
     try:

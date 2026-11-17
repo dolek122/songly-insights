@@ -10,7 +10,6 @@ from app.main import create_app
 
 
 def requests_count(route: str, status: str, method: str = "GET") -> float:
-    # Counters live for the whole test process, so tests compare before/after.
     value = REGISTRY.get_sample_value(
         "songly_http_requests_total", {"method": method, "route": route, "status": status}
     )
@@ -36,7 +35,6 @@ def test_requests_are_counted_per_route_template(client, factory):
     client.get(f"/api/v1/artists/{artist.id}")
     client.get(f"/api/v1/artists/{artist.id}")
 
-    # One series for the endpoint, not one per artist id.
     assert requests_count(route, "200") == before + 2
 
 
@@ -108,10 +106,8 @@ def test_data_metrics_after_pipeline_runs(client, db, build_marts):
 
     assert gauge("songly_marts_built") == 1
     assert 0 <= gauge("songly_marts_age_seconds") < 60
-    # The newest finished run (b) failed; the running one (c) is not finished yet.
     assert gauge("songly_pipeline_last_run_failed") == 1
     assert (gauge("songly_pipeline_dq_warnings"), gauge("songly_pipeline_dq_errors")) == (1, 3)
-    # Last success: run a.
     assert gauge("songly_pipeline_last_success_timestamp_seconds") == 1767236460
 
 
@@ -126,21 +122,20 @@ def test_metrics_work_when_the_database_is_down():
     app.dependency_overrides[get_db] = broken_db
     response = TestClient(app).get("/metrics")
 
-    # Prometheus still gets an answer; the problem is visible as a metric.
     assert response.status_code == 200
     assert gauge("songly_database_up") == 0
 
 
 def test_backup_metrics(client, db):
     client.get("/metrics")
-    assert gauge("songly_backup_last_success_timestamp_seconds") == 0  # never
+    assert gauge("songly_backup_last_success_timestamp_seconds") == 0
 
     db.execute(
         text(
             """
             INSERT INTO ops.backups (finished_at, status, verified) VALUES
                 ('2026-01-01T02:31Z', 'completed', true),
-                ('2026-01-02T02:31Z', 'completed', false),  -- not verified: does not count
+                ('2026-01-02T02:31Z', 'completed', false),
                 ('2026-01-03T02:31Z', 'failed', false)
             """
         )

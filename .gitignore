@@ -11,5 +11,7 @@ htmlcov/
 build/
 dist/
 
-# Database dumps (personal data): never commit
 backups/
+
+*.md
+!README.md

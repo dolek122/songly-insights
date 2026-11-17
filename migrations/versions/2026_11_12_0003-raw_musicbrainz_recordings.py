@@ -1,14 +1,3 @@
-"""raw table for MusicBrainz recordings
-
-Revision ID: 0003
-Revises: 0002
-Create Date: 2026-11-12
-
-Recordings of each MusicBrainz artist, downloaded with the browse endpoint
-(/ws/2/recording?artist=<mbid>) and stored exactly as received (ADR 0008).
-Written by hand, like 0002: raw tables are not ORM models.
-"""
-
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -44,7 +33,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # staging views read this table, so drop them first; the pipeline recreates them.
     op.execute("DROP SCHEMA IF EXISTS marts CASCADE")
     op.execute("DROP SCHEMA IF EXISTS staging CASCADE")
     op.drop_table("musicbrainz_recording_browse", schema="raw")

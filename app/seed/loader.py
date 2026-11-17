@@ -1,5 +1,3 @@
-"""Writes a SyntheticDataset to the database."""
-
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -10,7 +8,6 @@ from app.schemas.events import MAX_EVENTS_PER_IMPORT, ListeningEventIn
 from app.seed.generator import SyntheticDataset
 from app.services.events import import_events
 
-# Order does not matter for TRUNCATE ... CASCADE, but listing every table makes it explicit.
 TABLES = ["listening_events", "tracks", "artist_genres", "artists", "genres", "listeners"]
 
 
@@ -25,7 +22,6 @@ class LoadResult:
 
 
 def reset(session: Session) -> None:
-    """Delete all data (keeps the schema). RESTART IDENTITY makes ids start at 1 again."""
     session.execute(text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE"))
     session.commit()
 
@@ -39,10 +35,8 @@ def load(session: Session, data: SyntheticDataset) -> LoadResult:
     ]
     listeners = [Listener(username=u, country=c) for u, c in data.listeners]
     session.add_all([*genres.values(), *artists, *tracks, *listeners])
-    session.commit()  # after commit every object has its database id
+    session.commit()
 
-    # Events go through the same idempotent import as the API, so running the seed
-    # twice without --reset does not duplicate plays.
     events = [
         ListeningEventIn(
             listener_id=listeners[e.listener_index].id,

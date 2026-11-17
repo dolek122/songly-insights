@@ -4,9 +4,6 @@ from pydantic import BaseModel, Field
 
 
 class Window(BaseModel):
-    """Echo of the time window used, so the client sees how its input was interpreted."""
-
-    # `from` is a Python keyword, so the field is called from_ and renamed in JSON.
     from_: datetime | None = Field(serialization_alias="from")
     to: datetime | None
 
@@ -38,7 +35,6 @@ class DailyPlays(BaseModel):
 
 class StatsResponse(BaseModel):
     window: Window
-    # Statistics come from marts, which are as fresh as the last pipeline run (ADR 0007).
     data_as_of: datetime
 
 
@@ -70,9 +66,6 @@ class ListenerSummary(StatsResponse):
     top_genre: TopGenre | None
 
 
-# --- sessions (ADR 0010) --------------------------------------------------------------------
-
-
 class ListeningSession(BaseModel):
     started_at: datetime
     ended_at: datetime
@@ -80,7 +73,7 @@ class ListeningSession(BaseModel):
     plays: int
     unique_tracks: int
     unique_artists: int
-    listening_ms: int | None  # None when no track in the session has a known length
+    listening_ms: int | None
 
 
 class ListenerSessionsResponse(StatsResponse):
@@ -95,12 +88,8 @@ class SessionStats(StatsResponse):
     sessions: int
     avg_plays: float | None
     avg_duration_minutes: float | None
-    # Median: half of the sessions are shorter. Less sensitive to a few very long sessions.
     median_duration_minutes: float | None
     longest_duration_minutes: float | None
-
-
-# --- trends (ADR 0011) ----------------------------------------------------------------------
 
 
 class TrendItem(BaseModel):
@@ -109,18 +98,13 @@ class TrendItem(BaseModel):
     plays: int
     previous_plays: int
     change: int
-    # None when there were no plays before (growth from 0 has no percentage).
     change_pct: float | None
 
 
 class TrendResponse(StatsResponse):
-    # The window right before `window`, with the same length.
     previous_window: Window
     direction: str
     items: list[TrendItem]
-
-
-# --- similarity (ADR 0012) ------------------------------------------------------------------
 
 
 class SharedArtist(BaseModel):
@@ -131,10 +115,8 @@ class SharedArtist(BaseModel):
 class SimilarListener(BaseModel):
     listener_id: int
     username: str
-    # Cosine similarity of artist play counts: 1.0 = the same taste, 0 = nothing in common.
     similarity: float
     shared_artists: int
-    # Artists both listen to the most: explains why they are similar.
     top_shared_artists: list[SharedArtist]
 
 

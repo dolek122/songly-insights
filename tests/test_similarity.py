@@ -13,7 +13,6 @@ def day(d: int, minute: int = 0) -> datetime:
 
 @pytest.fixture
 def make_plays(factory):
-    """Create listeners with given play counts per artist: make_plays(alice={"A": 3, "B": 4})."""
     artists = {}
 
     def make(**listeners: dict[str, int]):
@@ -23,7 +22,6 @@ def make_plays(factory):
             for name, count in counts.items():
                 if name not in artists:
                     artists[name] = factory.track(factory.artist(name), name)
-                # Different minutes, so each play is a separate event.
                 factory.plays(listener, artists[name], *(day(1, m) for m in range(count)))
             created[username] = listener
         return created
@@ -43,14 +41,12 @@ def test_cosine_similarity_value(client, make_plays, build_marts):
 
     items = similar(client, people["alice"])
 
-    # (3*4 + 4*3) / (5 * 5) = 24 / 25
     assert [(i["username"], i["similarity"], i["shared_artists"]) for i in items] == [
         ("bob", 0.96, 2)
     ]
 
 
 def test_same_proportions_mean_the_same_taste(client, make_plays, build_marts):
-    # carol plays the same artists in the same proportions, just 10x more.
     people = make_plays(alice={"A": 1, "B": 2}, carol={"A": 10, "B": 20})
     build_marts()
 
@@ -62,7 +58,7 @@ def test_ranking_excludes_self_and_strangers(client, make_plays, build_marts):
         alice={"A": 5, "B": 1},
         twin={"A": 5, "B": 1},
         partial={"A": 1, "C": 5},
-        stranger={"Z": 9},  # nothing in common: not listed
+        stranger={"Z": 9},
     )
     build_marts()
 
@@ -82,8 +78,6 @@ def test_top_shared_artists_explain_the_similarity(client, make_plays, build_mar
 
     shared = similar(client, people["alice"])[0]["top_shared_artists"]
 
-    # Ranked by the smaller of the two play counts: E (7), C (5), D (2). A and B are
-    # big for only one of them.
     assert [a["name"] for a in shared] == ["E", "C", "D"]
 
 
@@ -102,7 +96,6 @@ def test_window_changes_the_vectors(client, factory, build_marts):
     factory.plays(bob, b, day(1))
     build_marts()
 
-    # On Jan 1 bob only played B: nothing in common with alice.
     assert similar(client, alice, **{"from": "2026-01-01", "to": "2026-01-02"}) == []
     assert len(similar(client, alice)) == 1
 

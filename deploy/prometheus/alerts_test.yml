@@ -1,5 +1,3 @@
-# Unit tests of the alert rules: promtool test rules deploy/prometheus/alerts_test.yml
-# Each test feeds made-up metric values and checks which alerts fire at a given time.
 rule_files:
   - alerts.yml
 
@@ -8,8 +6,6 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      # 25 h 50 min old at the start, growing by 60 s per minute: crosses 26 h after
-      # 10 minutes, and the alert fires after another 10 minutes ("for: 10m").
       - series: songly_marts_age_seconds
         values: "93000+60x30"
       - series: songly_pipeline_last_run_failed
@@ -43,7 +39,6 @@ tests:
       - series: 'songly_http_requests_total{route="/x", status="500"}'
         values: "0+10x10"
     alert_rule_test:
-      # 10% errors, but only for 4 minutes: "for: 5m" is not reached yet.
       - eval_time: 4m
         alertname: HighErrorRate
         exp_alerts: []
@@ -57,8 +52,6 @@ tests:
 
   - interval: 1m
     input_series:
-      # In promtool tests time() starts at 0, so the last good backup is put 26 h 7 min
-      # before the start: too old from the first minute, firing once "for: 15m" has passed.
       - series: songly_backup_last_success_timestamp_seconds
         values: "-94000x30"
       - series: songly_backup_last_failed

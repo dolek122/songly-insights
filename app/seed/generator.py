@@ -1,16 +1,3 @@
-"""Deterministic synthetic data generator.
-
-The same `seed` always produces the same data, so demos and bug reports are reproducible.
-The data is random but shaped a little like real listening:
-* every listener has a few favourite genres and mostly plays artists from them,
-* a few artists are much more popular than the rest (weights fall off like 1/rank),
-* more plays happen in the evening than at night,
-* plays come in listening sessions of 1-12 tracks played one after another,
-* each artist slowly gains or loses popularity over the period (a trend).
-
-Generation is pure Python (no database), which makes it easy to test.
-"""
-
 import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -34,7 +21,6 @@ _TITLE_WORDS = [
 ]  # fmt: skip
 _COUNTRIES = ["PL", "DE", "GB", "US", "FR", "SE", "ES", "IT", "NL", "CZ"]
 
-# Relative chance of a play in each UTC hour, 0..23: quiet nights, busy evenings.
 HOUR_WEIGHTS = [1, 1, 1, 1, 1, 1, 2, 4, 5, 4, 4, 5, 6, 5, 5, 5, 6, 7, 9, 10, 10, 8, 5, 2]
 
 
@@ -63,7 +49,7 @@ class SyntheticDataset:
     genres: list[str]
     artists: list[SyntheticArtist]
     tracks: list[SyntheticTrack]
-    listeners: list[tuple[str, str]]  # (username, country)
+    listeners: list[tuple[str, str]]
     events: list[SyntheticEvent] = field(default_factory=list)
 
 
@@ -77,7 +63,6 @@ def generate(
     days: int = 90,
     end: datetime | None = None,
 ) -> SyntheticDataset:
-    """Build a dataset. Events fall into the half-open window [end - days, end)."""
     rng = random.Random(seed)
     end = end or datetime(2026, 1, 1, tzinfo=UTC)
     start = end - timedelta(days=days)
@@ -86,31 +71,24 @@ def generate(
     track_list = _make_tracks(rng, artist_list, tracks_per_artist)
     listener_list = [(f"listener_{i + 1:03d}", rng.choice(_COUNTRIES)) for i in range(listeners)]
 
-    # Popularity by rank: artist 0 is the most popular, weight 1/(rank+1).
     popularity = [1 / (rank + 1) for rank in range(len(artist_list))]
     rng.shuffle(popularity)
     tracks_by_artist: dict[int, list[int]] = {}
     for index, track in enumerate(track_list):
         tracks_by_artist.setdefault(track.artist_index, []).append(index)
 
-    # Trend of each artist over the whole period, from -0.8 (fading) to +0.8 (rising).
-    # It makes /stats/trending-* show something more than random noise.
     trends = [rng.uniform(-0.8, 0.8) for _ in artist_list]
 
     events = []
     for listener_index in range(listeners):
         favourite_genres = set(rng.sample(GENRES, k=3))
-        # Favourite-genre artists are 5x more likely to be played by this listener.
         base_weights = [
             popularity[i] * (5 if favourite_genres & set(a.genres) else 1)
             for i, a in enumerate(artist_list)
         ]
         listener_events: list[SyntheticEvent] = []
-        # Plays come in sessions: a few tracks in a row, each one starting when the
-        # previous one ended plus a short pause (ADR 0010).
         while len(listener_events) < events_per_listener:
             moment = _random_moment(rng, start, days)
-            # 0.0 at the start of the period, 1.0 at the end; the trend shifts the weights.
             progress = (moment - start) / (end - start)
             weights = [w * (1 + trends[i] * (2 * progress - 1)) for i, w in enumerate(base_weights)]
             for _ in range(rng.randint(1, 12)):
@@ -140,7 +118,6 @@ def _make_artists(rng: random.Random, count: int) -> list[SyntheticArtist]:
     while len(result) < count:
         name = f"The {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)}"
         if name in names:
-            # 16 x 16 = 256 combinations; add a number instead of looping forever.
             name = f"{name} {len(result) + 1}"
         names.add(name)
         genres = rng.sample(GENRES, k=rng.choice([1, 1, 2, 2, 3]))

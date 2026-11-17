@@ -1,5 +1,3 @@
-"""Reads the state of the data for the Prometheus gauges in app/metrics.py (ADR 0014)."""
-
 import math
 from datetime import UTC, datetime
 
@@ -11,7 +9,6 @@ from app import metrics
 
 
 def refresh_data_metrics(session: Session) -> None:
-    """Called on every scrape of /metrics. Never raises: a broken database is a metric too."""
     try:
         _refresh(session)
         metrics.DATABASE_UP.set(1)
@@ -25,7 +22,6 @@ def _refresh(session: Session) -> None:
     if session.scalar(text("SELECT to_regclass('marts.build_info')")) is not None:
         built_at = session.scalar(text("SELECT built_at FROM marts.build_info"))
     metrics.MARTS_BUILT.set(1 if built_at else 0)
-    # NaN = "no value": an alert like "age > 26 h" stays quiet; MartsMissing covers it.
     age = (datetime.now(UTC) - built_at).total_seconds() if built_at else math.nan
     metrics.MARTS_AGE.set(age)
 
@@ -44,8 +40,6 @@ def _refresh(session: Session) -> None:
     )
     metrics.PIPELINE_LAST_SUCCESS.set(last_success.timestamp() if last_success else math.nan)
 
-    # Backups (ADR 0017). 0 instead of NaN when there is none: the backup service makes one
-    # as soon as it starts, so "no backup" for long is a real problem and must alert.
     last_backup = session.execute(
         text("SELECT status FROM ops.backups WHERE status <> 'running' ORDER BY id DESC LIMIT 1")
     ).one_or_none()

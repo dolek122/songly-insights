@@ -1,14 +1,3 @@
-"""ops.backups: history of database backups
-
-Revision ID: 0007
-Revises: 0006
-Create Date: 2026-11-13
-
-One row per backup made by deploy/backup/backup.sh (ADR 0017): file, size and whether
-a test restore of it worked. The API exposes the newest result as metrics, so an alert
-fires when backups stop. Written by hand: not an ORM model.
-"""
-
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -31,11 +20,9 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
-        # running -> completed | failed
         sa.Column("status", sa.Text(), nullable=False, server_default="running"),
         sa.Column("file_name", sa.Text(), nullable=True),
         sa.Column("size_bytes", sa.BigInteger(), nullable=True),
-        # True when the dump was restored into a throwaway database without errors.
         sa.Column("verified", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("error", sa.Text(), nullable=True),
         sa.CheckConstraint(

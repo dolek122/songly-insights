@@ -1,14 +1,3 @@
-"""ops schema: history of pipeline runs
-
-Revision ID: 0006
-Revises: 0005
-Create Date: 2026-11-12
-
-One row per pipeline run with its result and data quality summary (ADR 0014).
-The API exposes the newest row as Prometheus metrics, so monitoring can alert
-when the pipeline fails or stops running. Written by hand: not an ORM model.
-"""
-
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -33,7 +22,6 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
-        # running -> completed | failed
         sa.Column("status", sa.Text(), nullable=False, server_default="running"),
         sa.Column("dq_warnings", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("dq_errors", sa.Integer(), nullable=False, server_default="0"),

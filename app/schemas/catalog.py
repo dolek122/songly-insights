@@ -30,8 +30,6 @@ class ArtistOut(OrmModel):
 
 
 class ArtistRef(OrmModel):
-    """Short artist representation embedded in other objects."""
-
     id: int
     name: str
 
@@ -46,7 +44,7 @@ class TrackCreate(BaseModel):
 class TrackOut(OrmModel):
     id: int
     title: str
-    duration_ms: int | None  # None: length unknown (imported tracks)
+    duration_ms: int | None
     mbid: UUID | None
     artist: ArtistRef
     created_at: datetime

@@ -12,10 +12,6 @@ router = APIRouter(prefix="/listening-events", tags=["listening events"])
 
 @router.post("/bulk", response_model=BulkImportResult)
 def import_events(data: BulkImportRequest, db: Session = Depends(get_db)):
-    """Idempotent import: events that already exist are skipped and counted as duplicates.
-
-    Returns 200 (not 201) because a repeated call may create nothing.
-    """
     return events.import_events(db, data.events)
 
 

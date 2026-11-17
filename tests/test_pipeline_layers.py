@@ -25,7 +25,6 @@ def plays(factory):
         heroes,
         datetime(2026, 1, 1, 10, tzinfo=UTC),
         datetime(2026, 1, 1, 23, 30, tzinfo=UTC),
-        # 01:00 at UTC+02:00 is still Jan 1 (23:00) in UTC (ADR 0003).
         datetime.fromisoformat("2026-01-02T01:00:00+02:00"),
     )
     factory.plays(bob, heroes, datetime(2026, 1, 2, 9, tzinfo=UTC))
@@ -138,5 +137,4 @@ def test_failed_build_keeps_previous_marts(engine, db, plays, tmp_path, monkeypa
     with pytest.raises(Exception, match="table_that_does_not_exist"):
         layers.build_marts(engine)
 
-    # The DROP was rolled back together with the failing statement.
     assert rows(db, "SELECT count(*) FROM marts.artist_popularity") == [(2,)]

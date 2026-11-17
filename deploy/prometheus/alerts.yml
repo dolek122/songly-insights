@@ -1,6 +1,3 @@
-# Alert rules (ADR 0014). Prometheus evaluates them; firing alerts go to Alertmanager,
-# which sends the notifications (deploy/alertmanager/alertmanager.yml, ADR 0015).
-# `summary` is the text of the notification, so write it for a human reading a phone.
 groups:
   - name: api
     rules:
@@ -21,7 +18,6 @@ groups:
           summary: The API cannot query PostgreSQL.
 
       - alert: HighErrorRate
-        # Share of 5xx answers among all answers over the last 5 minutes.
         expr: |
           sum(rate(songly_http_requests_total{status=~"5.."}[5m]))
             / sum(rate(songly_http_requests_total[5m])) > 0.05
@@ -32,7 +28,6 @@ groups:
           summary: More than 5% of API requests fail with a server error.
 
       - alert: SlowRequests
-        # 95% of requests are faster than this value.
         expr: |
           histogram_quantile(0.95,
             sum by (le) (rate(songly_http_request_duration_seconds_bucket[5m]))) > 1
@@ -53,7 +48,6 @@ groups:
           summary: Marts do not exist; statistics endpoints answer 503. Run the pipeline.
 
       - alert: MartsStale
-        # The pipeline runs daily; 26 hours leaves room for a slow or late run.
         expr: songly_marts_age_seconds > 26 * 3600
         for: 10m
         labels:
@@ -78,8 +72,6 @@ groups:
   - name: backups
     rules:
       - alert: BackupMissing
-        # Backups run daily; 26 hours leaves room for a slow or late one. Also fires when
-        # there has never been a backup (the metric is 0 then).
         expr: time() - songly_backup_last_success_timestamp_seconds > 26 * 3600
         for: 15m
         labels:

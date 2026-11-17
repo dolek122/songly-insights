@@ -1,5 +1,3 @@
-"""Fake MusicBrainz responses for pipeline tests (no network)."""
-
 import httpx
 
 from pipeline.musicbrainz import MusicBrainzClient
@@ -13,7 +11,6 @@ REC_3 = "aaaaaaaa-0000-4000-8000-000000000003"
 
 
 def mb_artist(mbid: str, name: str, tags=(("jazz", 3),), country: str | None = "GB") -> dict:
-    """One artist in the shape returned by https://musicbrainz.org/ws/2/artist?fmt=json."""
     return {
         "id": mbid,
         "type": "Person",
@@ -31,7 +28,6 @@ def search_page(artists: list[dict], offset: int = 0) -> dict:
 
 
 def mb_recording(mbid: str, title: str, length: int | None = 200_000, video: bool = False) -> dict:
-    """One recording in the shape returned by /ws/2/recording?artist=<mbid>&fmt=json."""
     return {
         "id": mbid,
         "title": title,
@@ -47,13 +43,6 @@ def recordings_page(recordings: list[dict], offset: int = 0) -> dict:
 
 
 class FakeMusicBrainz:
-    """A fake MusicBrainz API that records every request.
-
-    `pages` answers artist searches: {(tag, offset): page}.
-    `recordings` answers recording browsing: {(artist_mbid, offset): page}.
-    Anything not listed gets an empty page.
-    """
-
     def __init__(
         self,
         pages: dict[tuple[str, int], dict],
@@ -90,11 +79,7 @@ class FakeMusicBrainz:
             base_url="https://musicbrainz.test/ws/2",
             transport=httpx.MockTransport(self.handler),
         )
-        # No real waiting in tests.
         return MusicBrainzClient(http, sleep=lambda _: None)
-
-
-# --- ListenBrainz ---------------------------------------------------------------------------
 
 
 def lb_listen(
@@ -107,11 +92,6 @@ def lb_listen(
     mapped: bool = True,
     msid: str | None = None,
 ) -> dict:
-    """One listen in the shape of /1/user/<name>/listens.
-
-    mapped=True puts the mbids where ListenBrainz's own MusicBrainz mapping puts them;
-    mapped=False only in `additional_info`, as sent by the listening app.
-    """
     additional_info: dict = {}
     if duration_ms is not None:
         additional_info["duration_ms"] = duration_ms
@@ -140,9 +120,6 @@ def lb_listen(
 
 
 class FakeListenBrainz:
-    """Serves {user: [listens]} with the real API's rules: newest first, `count`, and
-    `max_ts` meaning "strictly older than"."""
-
     def __init__(self, listens: dict[str, list[dict]]) -> None:
         self.listens = listens
         self.requests: list[httpx.Request] = []

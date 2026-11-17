@@ -1,15 +1,3 @@
-"""Prometheus metrics, request ids and the access log of the API (ADR 0014, ADR 0018).
-
-Two kinds of metrics:
-* HTTP traffic, recorded by a middleware for every request (counters and a histogram),
-* the state of the data (marts age, last pipeline run), read from the database each time
-  Prometheus scrapes /metrics (gauges).
-
-prometheus_client keeps metrics in the memory of the process, so the API runs with one
-uvicorn worker. Several workers would each have their own numbers (the library has a
-multiprocess mode for that, not needed at this scale).
-"""
-
 import logging
 import time
 import uuid
@@ -55,31 +43,21 @@ BACKUP_LAST_SUCCESS = Gauge(
 )
 BACKUP_LAST_FAILED = Gauge("songly_backup_last_failed", "1 when the newest backup failed")
 
-# One line per request (an "access log"). Shown when logging is configured (LOG_FORMAT=json).
 access_log = logging.getLogger("songly.access")
 
-# Requests to these paths are not recorded: Prometheus scrapes /metrics every few seconds
-# and Docker calls /health; they would drown the real traffic.
 NOT_RECORDED = {"/metrics", "/health"}
 
 
 def route_template(request: Request) -> str:
-    """The route template ("/api/v1/listeners/{listener_id}") instead of the real path
-    ("/api/v1/listeners/17"): one time series per endpoint, not one per listener.
-
-    FastAPI stores the matched route in the request scope as declared in its router,
-    i.e. without the prefix given to include_router(), so we add our one API prefix back.
-    """
     route = request.scope.get("route")
     if route is None:
-        return "unmatched"  # 404 for an unknown URL
+        return "unmatched"
     if request.url.path.startswith(API_PREFIX) and not route.path.startswith(API_PREFIX):
         return API_PREFIX + route.path
     return route.path
 
 
 def _incoming_request_id(request: Request) -> str:
-    """Reuse the caller's X-Request-ID (e.g. set by a proxy) if it looks sane, else make one."""
     value = request.headers.get("x-request-id", "")
     if 0 < len(value) <= 64 and all(c.isalnum() or c in "-_." for c in value):
         return value
@@ -87,21 +65,16 @@ def _incoming_request_id(request: Request) -> str:
 
 
 def install_middleware(app: FastAPI) -> None:
-    """One middleware for everything measured per request: request id, metrics, access log."""
 
     @app.middleware("http")
     async def observe_request(request: Request, call_next):
         started = time.perf_counter()
         rid = _incoming_request_id(request)
-        # Not reset at the end on purpose: the error handler for unexpected exceptions runs
-        # after this middleware and should still log the id. The value lives only in this
-        # request's context, so it cannot leak into another request.
         request_id.set(rid)
-        status = 500  # stays 500 when the endpoint raises an unexpected exception
+        status = 500
         try:
             response = await call_next(request)
             status = response.status_code
-            # The client can quote this id when reporting a problem.
             response.headers["X-Request-ID"] = rid
             return response
         finally:

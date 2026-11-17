@@ -5,7 +5,6 @@ import pytest
 from tests.conftest import assert_error
 
 API = "/api/v1"
-# Current window: Jan 8-14. Previous window (same length): Jan 1-7.
 WINDOW = {"from": "2026-01-08", "to": "2026-01-15"}
 
 
@@ -22,11 +21,11 @@ def library(factory, build_marts):
     steady = factory.track(factory.artist("Steady"))
     alice, bob = factory.listener("alice"), factory.listener("bob")
 
-    factory.plays(alice, rising, day(2), day(9), day(10), day(11))  # 1 -> 3
-    factory.plays(alice, falling, day(1), day(2), day(3), day(4), day(9))  # 4 -> 1
-    factory.plays(bob, new, day(12), day(13))  # 0 -> 2
-    factory.plays(alice, steady, day(5), day(12))  # 1 -> 1
-    factory.plays(alice, rising, day(20))  # after the window: ignored
+    factory.plays(alice, rising, day(2), day(9), day(10), day(11))
+    factory.plays(alice, falling, day(1), day(2), day(3), day(4), day(9))
+    factory.plays(bob, new, day(12), day(13))
+    factory.plays(alice, steady, day(5), day(12))
+    factory.plays(alice, rising, day(20))
     build_marts()
     return {"alice": alice, "bob": bob}
 
@@ -43,7 +42,6 @@ def test_rising_artists(client, library):
     assert body["previous_window"] == {"from": "2026-01-01T00:00:00Z", "to": "2026-01-08T00:00:00Z"}
     assert body["direction"] == "rising"
     assert [(i["name"], i["previous_plays"], i["plays"]) for i in body["items"]] == [
-        # Both grew by 2; the one with more plays now comes first.
         ("Rising", 1, 3),
         ("Newcomer", 0, 2),
     ]
@@ -53,7 +51,6 @@ def test_change_percentage(client, library):
     items = {i["name"]: i for i in trend(client, "trending-artists")["items"]}
 
     assert (items["Rising"]["change"], items["Rising"]["change_pct"]) == (2, 200.0)
-    # Growth from zero has no percentage.
     assert items["Newcomer"]["change_pct"] is None
 
 
@@ -71,7 +68,6 @@ def test_trending_genres_count_every_genre(client, library):
     rising = trend(client, "trending-genres")["items"]
     falling = trend(client, "trending-genres", direction="falling")["items"]
 
-    # rock: Rising 1 -> 3 and Newcomer 0 -> 2. jazz: Falling 4 -> 1 and Newcomer 0 -> 2.
     assert [(i["name"], i["previous_plays"], i["plays"]) for i in rising] == [("rock", 1, 5)]
     assert [(i["name"], i["previous_plays"], i["plays"]) for i in falling] == [("jazz", 4, 3)]
 

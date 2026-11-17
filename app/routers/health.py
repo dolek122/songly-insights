@@ -12,7 +12,6 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
-    """Liveness + database check. Returns 503 when PostgreSQL is not reachable."""
     try:
         db.execute(text("SELECT 1"))
     except SQLAlchemyError:

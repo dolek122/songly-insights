@@ -25,7 +25,7 @@ def test_all_checks_pass_on_clean_data(engine, one_play):
     results = quality.run_checks(engine, all_checks)
 
     assert failed_names(results) == []
-    quality.ensure_passed(results)  # does not raise
+    quality.ensure_passed(results)
 
 
 def test_play_in_the_future_stops_the_pipeline(engine, factory, one_play):
@@ -39,12 +39,12 @@ def test_play_in_the_future_stops_the_pipeline(engine, factory, one_play):
 
 
 def test_warning_does_not_stop_the_pipeline(engine, factory):
-    factory.track(factory.artist(), duration_ms=3 * 60 * 60 * 1000)  # a 3-hour track
+    factory.track(factory.artist(), duration_ms=3 * 60 * 60 * 1000)
 
     results = quality.run_checks(engine, quality.SOURCE_CHECKS)
 
     assert failed_names(results) == ["tracks_shorter_than_2_hours"]
-    quality.ensure_passed(results)  # only a warning
+    quality.ensure_passed(results)
 
 
 def test_reconciliation_detects_a_wrong_mart(engine, db, one_play):

@@ -1,5 +1,3 @@
-# Data sources created at Grafana start (ADR 0014). Fixed uids let the dashboard files
-# refer to them.
 apiVersion: 1
 
 datasources:
@@ -10,7 +8,6 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
 
-  # Read-only user created by docker/initdb/02-grafana-reader.sh.
   - name: Songly PostgreSQL
     uid: songly-postgres
     type: grafana-postgresql-datasource

@@ -1,10 +1,3 @@
-"""Prefect flow that runs the whole pipeline (ADR 0005).
-
-Prefect adds what a plain script lacks: retries, logs and state of every step,
-a UI (`prefect server start`) and schedules (`python -m pipeline serve`).
-The steps themselves live in plain modules; tasks here only call them.
-"""
-
 from prefect import flow, get_run_logger, task
 from prefect.runtime import flow_run
 from sqlalchemy import Engine
@@ -15,13 +8,11 @@ from pipeline import layers, listenbrainz, musicbrainz, quality, runs
 
 
 def get_engine() -> Engine:
-    # A function (not a module constant) so tests can point the flow at the test database.
     return db.engine
 
 
 @task
 def check_quality(layer: str, checks: list[quality.Check]) -> int:
-    """Run checks; raise on a failed "error" check. Returns the number of failed warnings."""
     logger = get_run_logger()
     results = quality.run_checks(get_engine(), checks)
     for r in results:
@@ -31,7 +22,6 @@ def check_quality(layer: str, checks: list[quality.Check]) -> int:
     return sum(1 for r in results if not r.passed)
 
 
-# MusicBrainz sometimes answers 503 when it is busy; waiting and trying again usually helps.
 @task(retries=3, retry_delay_seconds=30)
 def extract_musicbrainz(tags: list[str], artists_per_tag: int) -> musicbrainz.ExtractResult:
     client = musicbrainz.MusicBrainzClient.create(get_settings().musicbrainz_contact)
@@ -94,13 +84,6 @@ def songly_pipeline(
     listenbrainz_users: list[str] | None = None,
     listens_per_user: int = 1000,
 ) -> None:
-    """sources -> (MusicBrainz, ListenBrainz -> raw) -> staging -> (catalog) -> marts.
-
-    Data quality checks run between the steps. Without `musicbrainz_tags` and
-    `listenbrainz_users` only the API data is processed (no network needed).
-    `recordings_per_artist=0` skips downloading recordings.
-    """
-    # Every run is recorded in ops.pipeline_runs, also a failed one (for monitoring).
     run_id = runs.start_run(get_engine(), str(flow_run.id or "local"))
     warnings = 0
     try:
@@ -108,19 +91,14 @@ def songly_pipeline(
         if musicbrainz_tags:
             extract_musicbrainz(musicbrainz_tags, artists_per_tag)
         build_staging()
-        # The next two steps run after build_staging because they read staging views
-        # (the artist list, the newest known listen). Views read raw live, so whatever
-        # they download is visible in staging right away.
         if musicbrainz_tags and recordings_per_artist > 0:
             extract_musicbrainz_recordings(recordings_per_artist)
         if listenbrainz_users:
             extract_listenbrainz(listenbrainz_users, listens_per_user)
         warnings += check_quality("staging", quality.STAGING_CHECKS)
         if musicbrainz_tags:
-            # Staging views read the catalog live, so new artists reach the marts in this run.
             publish_musicbrainz(musicbrainz_tags)
         if listenbrainz_users:
-            # After MusicBrainz: tracks it created (with lengths and genres) are reused.
             publish_listenbrainz()
         build_marts()
         warnings += check_quality("marts", quality.MART_CHECKS)

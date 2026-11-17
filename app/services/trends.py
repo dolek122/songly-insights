@@ -1,11 +1,3 @@
-"""Trending artists and genres (ADR 0011).
-
-A trend compares the window with the window right before it, of the same length:
-for from=2026-01-08&to=2026-01-15 the previous window is 2026-01-01..2026-01-08.
-`change` = plays now - plays before. "rising" lists the biggest growth first,
-"falling" the biggest drop first. Read from marts.listener_track_daily (ADR 0007).
-"""
-
 from collections.abc import Callable
 from typing import Literal
 
@@ -43,7 +35,6 @@ def _trend(
 ) -> list[TrendItem]:
     previous = previous_window(window)
 
-    # One query reads both windows; CASE decides which window a row belongs to.
     in_current = facts.c.day >= window.from_.date()
     plays_now = total(case((in_current, facts.c.plays), else_=0))
     plays_before = total(case((in_current, 0), else_=facts.c.plays))
@@ -55,7 +46,6 @@ def _trend(
         stmt = stmt.having(change > 0).order_by(change.desc(), plays_now.desc(), id_column)
     else:
         stmt = stmt.having(change < 0).order_by(change, plays_before.desc(), id_column)
-    # Read from the start of the previous window to the end of the current one.
     both_windows = TimeWindow(from_=previous.from_, to=window.to)
     rows = session.execute(filter_days(stmt, both_windows, listener_id).limit(limit))
 
@@ -98,7 +88,6 @@ def trending_genres(
     limit: int,
     listener_id: int | None = None,
 ) -> list[TrendItem]:
-    # A play counts towards every genre of its artist (ADR 0003).
     return _trend(
         session,
         window,

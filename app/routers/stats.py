@@ -13,8 +13,6 @@ from app.schemas.stats import (
 )
 from app.services import sessions, stats, trends
 
-# All statistics are read from the marts built by the pipeline (ADR 0007):
-# windows must be whole UTC days and data is as fresh as `data_as_of`.
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 ListenerFilter = Query(None, description="Only plays of this listener")
@@ -53,7 +51,6 @@ def top_genres(
     listener_id: int | None = ListenerFilter,
     db: Session = Depends(get_db),
 ):
-    """A play counts towards every genre of its artist, so the sum can exceed total plays."""
     items = stats.top_genres(db, query.window, limit, listener_id)
     return TopGenresResponse(
         window=stats.window_out(query.window), data_as_of=query.data_as_of, items=items
@@ -66,7 +63,6 @@ def daily_plays(
     listener_id: int | None = ListenerFilter,
     db: Session = Depends(get_db),
 ):
-    """Plays per UTC day. Requires both `from` and `to`; days without plays have plays=0."""
     items = stats.daily_plays(db, query.window, listener_id)
     return DailyPlaysResponse(
         window=stats.window_out(query.window), data_as_of=query.data_as_of, items=items
@@ -79,10 +75,6 @@ def session_stats(
     listener_id: int | None = ListenerFilter,
     db: Session = Depends(get_db),
 ):
-    """Listening sessions: plays with gaps of at most 30 minutes (ADR 0010).
-
-    A session counts in the window of the UTC day it started on.
-    """
     values = sessions.session_stats(db, query.window, listener_id)
     return SessionStats(
         window=stats.window_out(query.window), data_as_of=query.data_as_of, **values
@@ -100,10 +92,6 @@ def trending_artists(
     listener_id: int | None = ListenerFilter,
     db: Session = Depends(get_db),
 ):
-    """Plays in the window compared with the previous window of the same length (ADR 0011).
-
-    Requires both `from` and `to`.
-    """
     items = trends.trending_artists(db, query.window, direction, limit, listener_id)
     return _trend_response(query, direction, items)
 
@@ -116,7 +104,6 @@ def trending_genres(
     listener_id: int | None = ListenerFilter,
     db: Session = Depends(get_db),
 ):
-    """Like /trending-artists; a play counts towards every genre of its artist."""
     items = trends.trending_genres(db, query.window, direction, limit, listener_id)
     return _trend_response(query, direction, items)
 

@@ -24,9 +24,6 @@ def raw_pages(db) -> list[tuple]:
     return [tuple(r) for r in db.execute(text(sql))]
 
 
-# --- client ---------------------------------------------------------------------------------
-
-
 def test_user_agent_names_the_app_and_contact():
     assert make_user_agent(None) == "songly-insights/0.1"
     assert make_user_agent("me@example.com") == "songly-insights/0.1 ( me@example.com )"
@@ -51,11 +48,11 @@ def test_client_waits_between_requests():
     client = musicbrainz.MusicBrainzClient(http, sleep=sleep, clock=lambda: now[0])
     request = http.build_request("GET", "https://musicbrainz.test/ws/2/artist")
 
-    client.send(request)  # first request: no waiting
+    client.send(request)
     now[0] += 0.25
-    client.send(request)  # 0.25 s later: wait the remaining 0.75 s
+    client.send(request)
     now[0] += 5
-    client.send(request)  # long after: no waiting
+    client.send(request)
 
     assert waits == [pytest.approx(0.75)]
 
@@ -65,9 +62,6 @@ def test_client_raises_on_server_error():
     client = fake.client()
     with pytest.raises(httpx.HTTPStatusError):
         client.send(client.artist_search_request("jazz", 10, 0))
-
-
-# --- extract --------------------------------------------------------------------------------
 
 
 def test_extract_follows_offsets(engine, db, monkeypatch):
@@ -83,7 +77,6 @@ def test_extract_follows_offsets(engine, db, monkeypatch):
         engine, fake.client(), ["jazz"], artists_per_tag=6, run_id="t"
     )
 
-    # Offset 2 returned fewer than 2 artists, so offset 4 is never requested.
     assert result.pages_downloaded == 2
     assert raw_pages(db) == [("jazz", 0), ("jazz", 2)]
 
@@ -108,7 +101,7 @@ def test_extract_downloads_again_when_cache_is_too_old(engine, db):
     )
 
     assert again.pages_downloaded == 1
-    assert len(raw_pages(db)) == 2  # raw is append-only, history is kept
+    assert len(raw_pages(db)) == 2
 
 
 def test_extract_stores_nothing_when_the_api_fails(engine, db):
@@ -116,9 +109,6 @@ def test_extract_stores_nothing_when_the_api_fails(engine, db):
     with pytest.raises(httpx.HTTPStatusError):
         musicbrainz.extract_artists_by_tag(engine, fake.client(), ["jazz"], 5, run_id="t")
     assert raw_pages(db) == []
-
-
-# --- publish to catalog ---------------------------------------------------------------------
 
 
 def load(engine, artists: list[dict]) -> None:
@@ -152,8 +142,6 @@ def test_publish_adds_artists_and_genres(engine, db, factory):
 
     result = musicbrainz.publish_to_catalog(engine, ["Jazz"])
 
-    # "jazz" is created because it was searched; "trumpet" is not a known genre;
-    # the negative "bebop" vote does not link Disliked to bebop.
     assert catalog(db) == [("Disliked", MBID_B, "jazz"), ("Miles", MBID_A, "bebop,jazz")]
     assert result.artists_upserted == 2
     assert result.genre_links_added == 3
@@ -170,9 +158,6 @@ def test_publish_is_idempotent_and_updates_names(engine, db):
     assert second.genre_links_added == 0
 
 
-# --- recordings -----------------------------------------------------------------------------
-
-
 def test_recording_browse_request():
     request = FakeMusicBrainz({}).client().recording_browse_request(MBID_A, limit=25, offset=50)
     assert request.url.path.endswith("/recording")
@@ -181,7 +166,6 @@ def test_recording_browse_request():
 
 
 def load_artists(engine, *artists: dict) -> None:
-    """Land artists in raw and build staging (recordings are fetched for staging artists)."""
     fake = FakeMusicBrainz({("jazz", 0): search_page(list(artists))})
     musicbrainz.extract_artists_by_tag(engine, fake.client(), ["jazz"], 25, run_id="t")
     layers.build_staging(engine)
@@ -200,10 +184,8 @@ def test_extract_recordings_for_every_staging_artist(engine, db, monkeypatch):
 
     result = musicbrainz.extract_recordings(engine, fake.client(), 10, run_id="t")
 
-    # A: page 0 is full, page 2 is short -> stop. B: page 0 is empty -> stop.
     assert fake.recording_requests() == [(MBID_A, 0), (MBID_A, 2), (MBID_B, 0)]
     assert result.pages_downloaded == 3
-    # Staging views read raw live: no rebuild needed to see the recordings.
     titles = db.execute(text("SELECT title FROM staging.musicbrainz_recordings ORDER BY title"))
     assert titles.scalars().all() == ["One", "Three", "Two"]
 
@@ -246,7 +228,6 @@ def test_publish_turns_recordings_into_tracks(engine, db):
         ],
     )
 
-    # Videos are skipped; a recording without a length gets an unknown (NULL) duration.
     assert tracks(db) == [("No Length", None, REC_2, "Miles"), ("So What", 545_000, REC_1, "Miles")]
     assert result.tracks_upserted == 2
 
@@ -265,7 +246,7 @@ def test_publish_tracks_is_idempotent_and_updates_title(engine, db):
     )
 
     assert tracks(db) == [("So What (Remastered)", 546_000, REC_1, "Miles")]
-    assert second.tracks_upserted == 1  # updated, not inserted again
+    assert second.tracks_upserted == 1
 
 
 def test_publish_shortens_too_long_titles(engine, db):

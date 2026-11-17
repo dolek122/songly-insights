@@ -11,12 +11,10 @@ from app.main import create_app
 
 @pytest.fixture
 def json_logs():
-    """Collect formatted JSON lines from all loggers while a test runs."""
     lines: list[dict] = []
 
     class Collect(logging.Handler):
         def emit(self, record):
-            # format() runs inside the request, so the request id ContextVar is visible.
             lines.append(json.loads(JsonFormatter().format(record)))
 
     handler = Collect()
@@ -60,7 +58,7 @@ def test_request_id_is_generated_and_returned(client):
     response = client.get("/api/v1/genres")
 
     rid = response.headers["X-Request-ID"]
-    assert len(rid) == 32  # uuid4 hex
+    assert len(rid) == 32
 
 
 def test_incoming_request_id_is_kept(client):
@@ -110,7 +108,6 @@ def test_every_log_of_a_request_has_its_id(json_logs):
 
     by_message = {x["message"]: x for x in json_logs}
     assert by_message["doing work"]["request_id"] == "work-1"
-    # The unexpected error is logged by the error handler, after the middleware: same id.
     assert by_message["Unhandled error"]["request_id"] == "boom-1"
     assert "RuntimeError: boom" in by_message["Unhandled error"]["exception"]
 

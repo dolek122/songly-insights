@@ -5,6 +5,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -16,6 +17,7 @@ from app.seed.loader import TABLES
 from pipeline import layers
 
 TEST_DATABASE_URL = get_settings().test_database_url
+TEST_API_KEY = "test-key"
 
 
 def alembic_config() -> Config:
@@ -68,7 +70,10 @@ def client(db: Session) -> Iterator[TestClient]:
         db.rollback()
 
     app.dependency_overrides[get_db] = test_db
-    with TestClient(app) as test_client:
+    app.dependency_overrides[get_settings] = lambda: get_settings().model_copy(
+        update={"api_key": SecretStr(TEST_API_KEY)}
+    )
+    with TestClient(app, headers={"X-API-Key": TEST_API_KEY}) as test_client:
         yield test_client
 
 

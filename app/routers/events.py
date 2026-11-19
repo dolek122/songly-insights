@@ -5,12 +5,13 @@ from app.db import get_db
 from app.routers.deps import PaginationDep, TimeWindowDep
 from app.schemas.common import Page
 from app.schemas.events import BulkImportRequest, BulkImportResult, ListeningEventOut
+from app.security import WRITE_ACCESS
 from app.services import events
 
 router = APIRouter(prefix="/listening-events", tags=["listening events"])
 
 
-@router.post("/bulk", response_model=BulkImportResult)
+@router.post("/bulk", response_model=BulkImportResult, dependencies=WRITE_ACCESS)
 def import_events(data: BulkImportRequest, db: Session = Depends(get_db)):
     return events.import_events(db, data.events)
 

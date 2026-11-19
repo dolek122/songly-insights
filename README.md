@@ -35,6 +35,15 @@ curl "localhost:8000/api/v1/stats/trending-artists?from=2025-12-02&to=2026-01-01
 curl "localhost:8000/api/v1/listeners/1/similar?limit=3"
 ```
 
+Odczyt jest otwarty, ale endpointy zapisujące (`POST`) wymagają klucza w nagłówku `X-API-Key`.
+Wygeneruj go np. poleceniem `openssl rand -hex 32` i wpisz do `.env` jako `API_KEY`; bez niego
+zapis przez API jest wyłączony. W `/docs` klucz wpisuje się przyciskiem „Authorize”.
+
+```bash
+curl -X POST localhost:8000/api/v1/genres -H "X-API-Key: twoj_klucz" \
+  -H "Content-Type: application/json" -d '{"name": "shoegaze"}'
+```
+
 Statystyki są liczone z tabel, które buduje pipeline, więc po dodaniu nowych odsłuchów trzeba
 go uruchomić ponownie (`python -m pipeline run`).
 
@@ -72,7 +81,7 @@ docker compose --profile full run --rm pipeline python -m app.cli seed --reset -
 docker compose --profile full run --rm pipeline python -m pipeline run
 ```
 
-Na serwerze zmień hasła w `.env` i ustaw `API_DOMAIN` oraz `GRAFANA_DOMAIN` – Caddy sam pobierze
+Na serwerze zmień hasła w `.env`, ustaw `API_KEY`, `API_DOMAIN` i `GRAFANA_DOMAIN` – Caddy sam pobierze
 certyfikaty. Z zewnątrz dostępne są tylko API i Grafana. Prometheus (9090), Alertmanager (9093)
 i Prefect (4200) słuchają na `127.0.0.1`, więc do nich wchodzi się przez tunel SSH.
 

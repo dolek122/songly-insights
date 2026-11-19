@@ -6,6 +6,7 @@ from app.routers.deps import PaginationDep, StatsQueryDep, TopLimit
 from app.schemas.catalog import ListenerCreate, ListenerOut
 from app.schemas.common import Page
 from app.schemas.stats import ListenerSessionsResponse, ListenerSummary, SimilarListenersResponse
+from app.security import WRITE_ACCESS
 from app.services import catalog, sessions, similarity, stats
 
 router = APIRouter(prefix="/listeners", tags=["listeners"])
@@ -22,7 +23,9 @@ def get_listener(listener_id: int, db: Session = Depends(get_db)):
     return catalog.get_listener(db, listener_id)
 
 
-@router.post("", response_model=ListenerOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=ListenerOut, status_code=status.HTTP_201_CREATED, dependencies=WRITE_ACCESS
+)
 def create_listener(data: ListenerCreate, db: Session = Depends(get_db)):
     return catalog.create_listener(db, data)
 

@@ -36,6 +36,7 @@ include = ["app*", "pipeline*"]
 
 [tool.setuptools.package-data]
 pipeline = ["sql/*.sql"]
+app = ["web/*", "web/vendor/*"]
 
 [tool.ruff]
 line-length = 100

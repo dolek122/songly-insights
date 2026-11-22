@@ -46,6 +46,7 @@ BACKUP_LAST_FAILED = Gauge("songly_backup_last_failed", "1 when the newest backu
 access_log = logging.getLogger("songly.access")
 
 NOT_RECORDED = {"/metrics", "/health"}
+KNOWN_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 
 
 def route_template(request: Request) -> str:
@@ -55,6 +56,10 @@ def route_template(request: Request) -> str:
     if request.url.path.startswith(API_PREFIX) and not route.path.startswith(API_PREFIX):
         return API_PREFIX + route.path
     return route.path
+
+
+def method_label(method: str) -> str:
+    return method if method in KNOWN_METHODS else "OTHER"
 
 
 def _incoming_request_id(request: Request) -> str:
@@ -81,8 +86,9 @@ def install_middleware(app: FastAPI) -> None:
             path = route_template(request)
             if path not in NOT_RECORDED:
                 duration = time.perf_counter() - started
-                HTTP_REQUESTS.labels(request.method, path, str(status)).inc()
-                HTTP_DURATION.labels(request.method, path).observe(duration)
+                method = method_label(request.method)
+                HTTP_REQUESTS.labels(method, path, str(status)).inc()
+                HTTP_DURATION.labels(method, path).observe(duration)
                 access_log.info(
                     "%s %s %s",
                     request.method,

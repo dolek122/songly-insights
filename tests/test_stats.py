@@ -247,3 +247,22 @@ def test_unknown_track_length_counts_as_play_but_not_as_time(client, factory, bu
 
     assert body["total_plays"] == 3
     assert body["total_listening_ms"] == 100_000
+
+
+def test_data_range(client, library):
+    body = client.get(f"{API}/stats/data-range").json()
+
+    assert body["first_day"] == "2026-01-01"
+    assert body["last_day"] == "2026-01-05"
+    assert body["data_as_of"] is not None
+
+
+def test_data_range_without_plays(client, empty_marts):
+    body = client.get(f"{API}/stats/data-range").json()
+
+    assert body["first_day"] is None
+    assert body["last_day"] is None
+
+
+def test_data_range_before_pipeline_run(client):
+    assert_error(client.get(f"{API}/stats/data-range"), 503, "marts_not_ready")

@@ -106,10 +106,11 @@ def extract_artists_by_tag(
     page_size = min(MAX_PAGE_SIZE, artists_per_tag)
     for tag in sorted({normalize_tag(t) for t in tags}):
         for offset in range(0, artists_per_tag, page_size):
+            size = min(page_size, artists_per_tag - offset)
             payload = _fetch_page(
                 engine,
                 client,
-                client.artist_search_request(tag, page_size, offset),
+                client.artist_search_request(tag, size, offset),
                 table="raw.musicbrainz_artist_search",
                 columns={"run_id": run_id, "tag": tag, "page_offset": offset},
                 max_age_days=max_age_days,
@@ -117,7 +118,7 @@ def extract_artists_by_tag(
             )
             artists_on_page = len(payload.get("artists", []))
             logger.info("MusicBrainz tag=%r offset=%d: %d artists", tag, offset, artists_on_page)
-            if artists_on_page < page_size:
+            if artists_on_page < size:
                 break
     return result
 
@@ -139,16 +140,17 @@ def extract_recordings(
     page_size = min(MAX_PAGE_SIZE, recordings_per_artist)
     for mbid in artist_mbids:
         for offset in range(0, recordings_per_artist, page_size):
+            size = min(page_size, recordings_per_artist - offset)
             payload = _fetch_page(
                 engine,
                 client,
-                client.recording_browse_request(mbid, page_size, offset),
+                client.recording_browse_request(mbid, size, offset),
                 table="raw.musicbrainz_recording_browse",
                 columns={"run_id": run_id, "artist_mbid": mbid, "page_offset": offset},
                 max_age_days=max_age_days,
                 result=result,
             )
-            if len(payload.get("recordings", [])) < page_size:
+            if len(payload.get("recordings", [])) < size:
                 break
     logger.info("MusicBrainz recordings of %d artists: %s", len(artist_mbids), result)
     return result

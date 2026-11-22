@@ -38,6 +38,12 @@ class StatsResponse(BaseModel):
     data_as_of: datetime
 
 
+class DataRange(BaseModel):
+    first_day: date | None
+    last_day: date | None
+    data_as_of: datetime
+
+
 class TopTracksResponse(StatsResponse):
     items: list[TopTrack]
 

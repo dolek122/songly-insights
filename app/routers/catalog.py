@@ -12,6 +12,7 @@ from app.schemas.catalog import (
     TrackOut,
 )
 from app.schemas.common import Page
+from app.security import WRITE_ACCESS
 from app.services import catalog
 
 router = APIRouter(tags=["catalog"])
@@ -22,7 +23,12 @@ def list_genres(db: Session = Depends(get_db)):
     return catalog.list_genres(db)
 
 
-@router.post("/genres", response_model=GenreOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/genres",
+    response_model=GenreOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=WRITE_ACCESS,
+)
 def create_genre(data: GenreCreate, db: Session = Depends(get_db)):
     return catalog.create_genre(db, data)
 
@@ -42,7 +48,12 @@ def get_artist(artist_id: int, db: Session = Depends(get_db)):
     return catalog.get_artist(db, artist_id)
 
 
-@router.post("/artists", response_model=ArtistOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/artists",
+    response_model=ArtistOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=WRITE_ACCESS,
+)
 def create_artist(data: ArtistCreate, db: Session = Depends(get_db)):
     return catalog.create_artist(db, data)
 
@@ -62,6 +73,11 @@ def get_track(track_id: int, db: Session = Depends(get_db)):
     return catalog.get_track(db, track_id)
 
 
-@router.post("/tracks", response_model=TrackOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/tracks",
+    response_model=TrackOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=WRITE_ACCESS,
+)
 def create_track(data: TrackCreate, db: Session = Depends(get_db)):
     return catalog.create_track(db, data)

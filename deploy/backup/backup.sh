@@ -29,8 +29,8 @@ backup_once() {
     file="$BACKUP_DIR/insights-$(date -u +%Y%m%dT%H%M%SZ).dump"
     log "starting $file"
 
-    if pg_dump --format=custom --file="$file.partial" && mv "$file.partial" "$file" \
-        && verify "$file"; then
+    if pg_dump --format=custom --file="$file.partial" && verify "$file.partial" \
+        && mv "$file.partial" "$file"; then
         sql -v id="$id" -v name="$(basename "$file")" -v size="$(stat -c %s "$file")" <<'SQL'
 UPDATE ops.backups
 SET finished_at = now(), status = 'completed', file_name = :'name',

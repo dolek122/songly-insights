@@ -145,3 +145,13 @@ def test_backup_metrics(client, db):
 
     assert gauge("songly_backup_last_success_timestamp_seconds") == 1767234660
     assert gauge("songly_backup_last_failed") == 1
+
+
+def test_unknown_methods_share_one_label(client):
+    before = requests_count("/api/v1/genres", "405", method="OTHER")
+
+    client.request("FOO1", "/api/v1/genres")
+    client.request("FOO2", "/api/v1/genres")
+
+    assert requests_count("/api/v1/genres", "405", method="OTHER") == before + 2
+    assert requests_count("/api/v1/genres", "405", method="FOO1") == 0

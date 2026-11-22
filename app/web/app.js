@@ -178,24 +178,44 @@ function drawChart(chart) {
   });
 }
 
+async function trendSection(period) {
+  if (period.from <= state.range.first_day) {
+    return {
+      subtitle: "",
+      html: `<p class="muted">Trendy porównują okres z poprzednim okresem tej samej długości. Wybierz krótszy okres, żeby je zobaczyć.</p>`,
+    };
+  }
+  const [rising, falling] = await Promise.all([
+    api("/stats/trending-artists", { ...period, limit: 5 }),
+    api("/stats/trending-artists", { ...period, limit: 5, direction: "falling" }),
+  ]);
+  const previous = {
+    from: rising.previous_window.from.slice(0, 10),
+    to: rising.previous_window.to.slice(0, 10),
+  };
+  return {
+    subtitle: ` · trendy w porównaniu z okresem ${windowLabel(previous)}`,
+    html: `<div class="grid">
+      ${card("Najszybciej rosnący artyści", trendList(rising.items))}
+      ${card("Najszybciej tracący artyści", trendList(falling.items))}
+    </div>`,
+  };
+}
+
 async function overviewPage() {
   const period = currentWindow();
-  const [daily, sessions, artists, genres, tracks, rising, falling] = await Promise.all([
+  const [daily, sessions, artists, genres, tracks, trends] = await Promise.all([
     api("/stats/daily", period),
     api("/stats/sessions", period),
     api("/stats/top-artists", { ...period, limit: 8 }),
     api("/stats/top-genres", { ...period, limit: 8 }),
     api("/stats/top-tracks", { ...period, limit: 8 }),
-    api("/stats/trending-artists", { ...period, limit: 5 }),
-    api("/stats/trending-artists", { ...period, limit: 5, direction: "falling" }),
+    trendSection(period),
   ]);
   const totalPlays = daily.items.reduce((sum, item) => sum + item.plays, 0);
   const html = `
     <h1>Przegląd</h1>
-    <p class="subtitle">${windowLabel(period)} · trendy w porównaniu z okresem ${windowLabel({
-      from: rising.previous_window.from.slice(0, 10),
-      to: rising.previous_window.to.slice(0, 10),
-    })}</p>
+    <p class="subtitle">${windowLabel(period)}${trends.subtitle}</p>
     <div class="tiles">
       ${tile("Odsłuchy", number(totalPlays))}
       ${tile("Sesje słuchania", number(sessions.sessions))}
@@ -222,10 +242,7 @@ async function overviewPage() {
         extra: (t) => t.artist_name,
       }))}
     </div>
-    <div class="grid">
-      ${card("Najszybciej rosnący artyści", trendList(rising.items))}
-      ${card("Najszybciej tracący artyści", trendList(falling.items))}
-    </div>`;
+    ${trends.html}`;
   return { html, chart: dailyChart(daily.items) };
 }
 
@@ -400,11 +417,11 @@ function errorPage(error) {
 }
 
 const routes = [
-  [/^\/$/, overviewPage, "overview"],
-  [/^\/listeners$/, listenersPage, "listeners"],
-  [/^\/listeners\/(\d+)$/, listenerPage, "listeners"],
-  [/^\/artists$/, artistsPage, "artists"],
-  [/^\/artists\/(\d+)$/, artistPage, "artists"],
+  { pattern: /^\/$/, page: overviewPage, section: "overview", stats: true },
+  { pattern: /^\/listeners$/, page: listenersPage, section: "listeners", stats: false },
+  { pattern: /^\/listeners\/(\d+)$/, page: listenerPage, section: "listeners", stats: true },
+  { pattern: /^\/artists$/, page: artistsPage, section: "artists", stats: false },
+  { pattern: /^\/artists\/(\d+)$/, page: artistPage, section: "artists", stats: false },
 ];
 
 function highlightNav(section) {
@@ -414,11 +431,13 @@ function highlightNav(section) {
 }
 
 async function loadRange() {
-  state.range = await api("/stats/data-range");
-  const footer = document.getElementById("footer");
-  footer.textContent = state.range.last_day
-    ? `Dane od ${state.range.first_day} do ${state.range.last_day} · ostatnie uruchomienie pipeline'u: ${dateTime(state.range.data_as_of)}`
-    : "";
+  const range = await api("/stats/data-range");
+  if (!range.last_day) {
+    throw new ApiError(503, { code: "marts_not_ready", message: "Brak odsłuchów w martach." });
+  }
+  state.range = range;
+  document.getElementById("footer").textContent =
+    `Dane od ${range.first_day} do ${range.last_day} · ostatnie uruchomienie pipeline'u: ${dateTime(range.data_as_of)}`;
 }
 
 async function render() {
@@ -426,26 +445,19 @@ async function render() {
   const [path, query = ""] = location.hash.slice(1).split("?");
   const params = new URLSearchParams(query);
   const view = document.getElementById("view");
-  const route = routes.find(([pattern]) => pattern.test(path || "/"));
+  const route = routes.find(({ pattern }) => pattern.test(path || "/"));
   if (!route) {
     location.hash = "#/";
     return;
   }
-  const [pattern, page, section] = route;
-  highlightNav(section);
+  highlightNav(route.section);
   view.innerHTML = `<p class="muted">Wczytywanie…</p>`;
   try {
-    if (!state.range) {
+    if (route.stats && !state.range) {
       await loadRange();
     }
-    if (!state.range.last_day) {
-      throw new ApiError(503, {
-        code: "marts_not_ready",
-        message: "Brak odsłuchów w martach.",
-      });
-    }
-    const match = (path || "/").match(pattern);
-    const result = await page(params, ...match.slice(1));
+    const match = (path || "/").match(route.pattern);
+    const result = await route.page(params, ...match.slice(1));
     if (token !== renderToken) {
       return;
     }

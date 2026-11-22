@@ -56,8 +56,8 @@ def test_extract_pages_back_in_time(engine, db):
 
     result = extract(engine, fake, page_size=2)
 
-    assert fake.max_ts_sent() == [None, str(T0 + 3), str(T0 + 1), str(T0)]
-    assert (result.pages_downloaded, result.listens_downloaded) == (4, 5)
+    assert fake.max_ts_sent() == [None, str(T0 + 4), str(T0 + 3), str(T0 + 2), str(T0 + 1)]
+    assert (result.pages_downloaded, result.listens_downloaded) == (5, 5)
     assert rows(db, "SELECT count(*) FROM staging.listenbrainz_listens") == [(5,)]
 
 
@@ -67,7 +67,7 @@ def test_extract_stops_at_the_limit(engine):
     result = extract(engine, fake, max_listens=3, page_size=2)
 
     assert result.listens_downloaded == 3
-    assert [r.url.params["count"] for r in fake.requests] == ["2", "1"]
+    assert [r.url.params["count"] for r in fake.requests] == ["2", "1", "1"]
 
 
 def test_extract_is_incremental(engine, db):
@@ -78,9 +78,41 @@ def test_extract_is_incremental(engine, db):
 
     again = extract(engine, fake, page_size=2)
 
-    assert fake.max_ts_sent() == [None, str(T0 + 10)]
-    assert again.listens_downloaded == 4
+    assert fake.max_ts_sent() == [None, str(T0 + 11)]
+    assert again.listens_downloaded == 3
     assert rows(db, "SELECT count(*) FROM staging.listenbrainz_listens") == [(6,)]
+
+
+def test_incremental_load_is_not_cut_by_the_limit(engine, db):
+    fake = FakeListenBrainz({"ana": [lb_listen(T0 + i, REC_1) for i in range(4)]})
+    extract(engine, fake, max_listens=2)
+    fake.listens["ana"] += [lb_listen(T0 + 10 + i, REC_1) for i in range(5)]
+
+    extract(engine, fake, max_listens=2, page_size=2)
+
+    count = rows(
+        db,
+        "SELECT count(*) FROM staging.listenbrainz_listens WHERE listened_at > :t",
+        t=datetime.fromtimestamp(T0 + 3, UTC),
+    )
+    assert count == [(5,)]
+
+
+def test_extract_keeps_listens_from_the_same_second(engine, db):
+    fake = FakeListenBrainz(
+        {
+            "ana": [
+                lb_listen(T0 + 1, REC_1, msid="m1"),
+                lb_listen(T0, REC_1, msid="m2"),
+                lb_listen(T0, REC_2, msid="m3"),
+            ]
+        }
+    )
+
+    result = extract(engine, fake, page_size=2)
+
+    assert result.listens_downloaded == 3
+    assert rows(db, "SELECT count(*) FROM staging.listenbrainz_listens") == [(3,)]
 
 
 def test_staging_parses_listens(engine, db):
@@ -147,6 +179,27 @@ def test_publish_creates_listeners_tracks_and_events(engine, db):
     results = quality.run_checks(engine, quality.STAGING_CHECKS)
     warnings = [r.check.name for r in results if not r.passed]
     assert warnings == ["listenbrainz_listens_have_recording_mbid"]
+
+
+def test_publish_picks_a_free_username(engine, db, factory):
+    factory.listener("lb_ana")
+    extract(engine, FakeListenBrainz({"ana": [lb_listen(T0, REC_1, MBID_A, "So What", "Miles")]}))
+
+    result = listenbrainz.publish_listens(engine)
+
+    assert rows(db, "SELECT username FROM listeners WHERE listenbrainz_user = 'ana'") == [
+        ("lb_ana_2",)
+    ]
+    assert (result.listeners_added, result.events_added) == (1, 1)
+
+
+def test_publish_shortens_long_usernames(engine, db):
+    long_name = "x" * 60
+    extract(engine, FakeListenBrainz({long_name: [lb_listen(T0, REC_1, MBID_A)]}))
+
+    listenbrainz.publish_listens(engine)
+
+    assert rows(db, "SELECT username FROM listeners") == [(("lb_" + long_name)[:50],)]
 
 
 def test_publish_is_idempotent(engine, db):

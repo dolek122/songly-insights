@@ -81,6 +81,16 @@ def test_extract_follows_offsets(engine, db, monkeypatch):
     assert raw_pages(db) == [("jazz", 0), ("jazz", 2)]
 
 
+def test_extract_does_not_download_more_than_asked(engine, monkeypatch):
+    monkeypatch.setattr(musicbrainz, "MAX_PAGE_SIZE", 2)
+    artists = [mb_artist(MBID_A, "A"), mb_artist(MBID_B, "B")]
+    fake = FakeMusicBrainz({("jazz", 0): search_page(artists), ("jazz", 2): search_page(artists)})
+
+    musicbrainz.extract_artists_by_tag(engine, fake.client(), ["jazz"], 3, run_id="t")
+
+    assert [r.url.params["limit"] for r in fake.requests] == ["2", "1"]
+
+
 def test_extract_uses_raw_as_cache(engine, db):
     fake = FakeMusicBrainz({("jazz", 0): search_page([mb_artist(MBID_A, "A")])})
     musicbrainz.extract_artists_by_tag(engine, fake.client(), ["jazz"], 5, run_id="first")

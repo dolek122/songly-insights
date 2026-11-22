@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 import httpx
-from sqlalchemy import Engine, text
+from sqlalchemy import Connection, Engine, text
 
 from pipeline.http import RateLimiter, make_user_agent, send_json
 
@@ -69,6 +69,17 @@ _INSERT_PAGE = text(
 )
 
 
+def _listen_key(listen: dict) -> tuple:
+    return listen["listened_at"], listen.get("recording_msid")
+
+
+def _next_max_ts(oldest: int, current: int | None) -> int:
+    overlapping = oldest + 1
+    if current is not None and overlapping >= current:
+        return oldest
+    return overlapping
+
+
 def extract_listens(
     engine: Engine,
     client: ListenBrainzClient,
@@ -82,10 +93,11 @@ def extract_listens(
     for user in sorted({u.strip() for u in users if u.strip()}):
         with engine.connect() as conn:
             watermark = conn.execute(_WATERMARK, {"user": user}).scalar()
-        fetched = 0
+        limit = max_listens_per_user if watermark is None else None
+        seen: set[tuple] = set()
         max_ts: int | None = None
-        while fetched < max_listens_per_user:
-            count = min(page_size, max_listens_per_user - fetched)
+        while limit is None or len(seen) < limit:
+            count = page_size if limit is None else min(page_size, limit - len(seen))
             request = client.listens_request(user, count, max_ts)
             payload = client.send(request)
             with engine.begin() as conn:
@@ -101,15 +113,16 @@ def extract_listens(
                 )
             listens = payload.get("payload", {}).get("listens", [])
             result.pages_downloaded += 1
-            result.listens_downloaded += len(listens)
-            fetched += len(listens)
-            if not listens:
+            new_keys = {_listen_key(listen) for listen in listens} - seen
+            seen |= new_keys
+            result.listens_downloaded += len(new_keys)
+            if len(listens) < count:
                 break
             oldest = min(listen["listened_at"] for listen in listens)
             if watermark is not None and oldest <= watermark:
                 break
-            max_ts = oldest
-        logger.info("ListenBrainz %s: %d listens (watermark %s)", user, fetched, watermark)
+            max_ts = _next_max_ts(oldest, max_ts)
+        logger.info("ListenBrainz %s: %d listens (watermark %s)", user, len(seen), watermark)
     return result
 
 
@@ -121,18 +134,50 @@ class PublishListensResult:
     events_added: int
 
 
+USERNAME_LENGTH = 50
+
+_NEW_USERS = text(
+    """
+    SELECT DISTINCT l.user_name
+    FROM staging.listenbrainz_listens AS l
+    WHERE NOT EXISTS (
+        SELECT FROM public.listeners AS li WHERE li.listenbrainz_user = l.user_name
+    )
+    ORDER BY l.user_name
+    """
+)
+
+_INSERT_LISTENER = text(
+    "INSERT INTO public.listeners (username, listenbrainz_user) VALUES (:name, :user)"
+)
+
+_USERNAME_TAKEN = text("SELECT EXISTS (SELECT FROM public.listeners WHERE username = :name)")
+
+
+def _free_username(conn: Connection, user: str) -> str:
+    base = f"lb_{user}"[:USERNAME_LENGTH]
+    name = base
+    number = 1
+    while conn.execute(_USERNAME_TAKEN, {"name": name}).scalar():
+        number += 1
+        suffix = f"_{number}"
+        name = base[: USERNAME_LENGTH - len(suffix)] + suffix
+    return name
+
+
+def _add_listeners(conn: Connection) -> int:
+    users = conn.execute(_NEW_USERS).scalars().all()
+    for user in users:
+        conn.execute(
+            _INSERT_LISTENER,
+            {"name": _free_username(conn, user), "user": user},
+        )
+    return len(users)
+
+
 def publish_listens(engine: Engine) -> PublishListensResult:
     with engine.begin() as conn:
-        listeners = conn.execute(
-            text(
-                """
-                INSERT INTO public.listeners (username, listenbrainz_user)
-                SELECT DISTINCT left('lb_' || user_name, 50), user_name
-                FROM staging.listenbrainz_listens
-                ON CONFLICT DO NOTHING
-                """
-            )
-        ).rowcount
+        listeners = _add_listeners(conn)
         artists = conn.execute(
             text(
                 """
